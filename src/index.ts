@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { Env, AnalysisJob } from './types';
 import analysisRoutes from './routes/analysis';
 import recordingsRoutes from './routes/recordings';
+import visionRoutes from './routes/vision';
 import { processAnalysisJob } from './services/analyzer';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -43,6 +44,7 @@ app.get('/health', (c) => {
 // Routes
 app.route('/analysis', analysisRoutes);
 app.route('/recordings', recordingsRoutes);
+app.route('/vision', visionRoutes);
 
 // 404 handler
 app.notFound((c) => {
