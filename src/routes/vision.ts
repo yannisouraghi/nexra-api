@@ -4,7 +4,7 @@ import { Env } from '../types';
 const app = new Hono<{ Bindings: Env }>();
 
 // Heartbeat TTL in seconds (consider offline after this)
-const HEARTBEAT_TTL = 60;
+const HEARTBEAT_TTL = 30;
 
 // POST /vision/heartbeat - Nexra Vision sends heartbeat
 app.post('/heartbeat', async (c) => {
