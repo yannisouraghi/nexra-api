@@ -1,0 +1,22 @@
+# Environment secrets
+.dev.vars
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+.wrangler/
+
+# IDE
+.idea/
+.vscode/
+
+# Temp files
+tmpclaude-*
+*.log
+.DS_Store
+Thumbs.db
+test_r2.txt

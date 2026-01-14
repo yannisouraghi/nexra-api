@@ -1,0 +1,22 @@
+{
+  "name": "nexra-api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute nexra-db --local --file=./schema.sql",
+    "db:migrate:prod": "wrangler d1 execute nexra-db --remote --file=./schema.sql"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@hono/zod-validator": "^0.7.6",
+    "hono": "^4.11.4",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260113.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.59.0"
+  }
+}

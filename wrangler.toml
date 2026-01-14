@@ -1,0 +1,35 @@
+name = "nexra-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+# Environment variables (secrets should be added via wrangler secret put)
+[vars]
+ENVIRONMENT = "development"
+FRONTEND_URL = "http://localhost:3000"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "nexra-db"
+database_id = "38b813f0-e6d3-4b2a-8b59-b65a1445c483"
+
+# R2 Bucket for video storage
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "nexra-videos"
+
+# Queue for async analysis processing
+[[queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "nexra-analysis-queue"
+
+[[queues.consumers]]
+queue = "nexra-analysis-queue"
+max_batch_size = 1
+max_batch_timeout = 30
+
+# KV for caching
+[[kv_namespaces]]
+binding = "CACHE"
+id = "74db79c7f6e54990b747fa163cc4d004"
