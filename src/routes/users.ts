@@ -62,21 +62,20 @@ app.post('/auth', async (c) => {
     ).bind(normalizedEmail).first<User>();
 
     if (existingByEmail) {
-      // User exists - update their info and return (keeping their Riot account!)
-      // Also update the ID if it changed (OAuth can generate different IDs)
+      // User exists - update their info but KEEP their original ID
+      // (can't change ID due to foreign key constraints from analyses/recordings tables)
       await c.env.DB.prepare(
-        'UPDATE users SET id = ?, last_login_at = ?, updated_at = ?, name = ?, image = ? WHERE LOWER(email) = ?'
-      ).bind(body.id, now, now, body.name || existingByEmail.name, body.image || existingByEmail.image, normalizedEmail).run();
+        'UPDATE users SET last_login_at = ?, updated_at = ?, name = ?, image = ? WHERE LOWER(email) = ?'
+      ).bind(now, now, body.name || existingByEmail.name, body.image || existingByEmail.image, normalizedEmail).run();
 
-      // Return the updated user with all their data (including Riot account!)
-      const updatedUser = await c.env.DB.prepare(
-        'SELECT * FROM users WHERE id = ?'
-      ).bind(body.id).first<User>();
-
+      // Return the user with their ORIGINAL database ID
+      // The frontend should use this ID for subsequent requests
       return c.json({
         success: true,
-        user: updatedUser,
+        user: existingByEmail, // Use the existing user with their original ID
         isNewUser: false,
+        // Tell frontend to use this ID instead of session ID
+        useDbId: true,
       });
     }
 
@@ -95,9 +94,14 @@ app.post('/auth', async (c) => {
       user: newUser,
       isNewUser: true,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating/updating user:', error);
-    return c.json({ success: false, error: 'Failed to create/update user' }, 500);
+    console.error('Error details:', error?.message, error?.cause);
+    return c.json({
+      success: false,
+      error: 'Failed to create/update user',
+      details: error?.message || String(error)
+    }, 500);
   }
 });
 
