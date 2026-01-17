@@ -3,11 +3,30 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { Env, Recording, ApiResponse } from '../types';
 import { generateId } from '../utils/helpers';
+import { rateLimit } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Rate limiter for uploads (more restrictive)
+const uploadRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  maxRequests: 5, // 5 uploads per minute max
+});
+
+// Rate limiter for reads
+const readRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+});
+
+// Rate limiter for deletes
+const deleteRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  maxRequests: 10,
+});
+
 // GET /recordings - List all recordings for a user with analysis status
-app.get('/', async (c) => {
+app.get('/', readRateLimit, async (c) => {
   const puuid = c.req.query('puuid');
   const limit = parseInt(c.req.query('limit') || '20');
   const offset = parseInt(c.req.query('offset') || '0');
@@ -119,7 +138,7 @@ const createRecordingSchema = z.object({
 });
 
 // GET /recordings/check/:matchId - Check if recording exists
-app.get('/check/:matchId', async (c) => {
+app.get('/check/:matchId', readRateLimit, async (c) => {
   const matchId = c.req.param('matchId');
 
   try {
@@ -138,7 +157,7 @@ app.get('/check/:matchId', async (c) => {
 });
 
 // GET /recordings/:matchId - Get recording metadata
-app.get('/:matchId', async (c) => {
+app.get('/:matchId', readRateLimit, async (c) => {
   const matchId = c.req.param('matchId');
 
   try {
@@ -161,7 +180,7 @@ app.get('/:matchId', async (c) => {
 });
 
 // POST /recordings/upload-url - Get presigned URL for upload
-app.post('/upload-url', zValidator('json', createRecordingSchema), async (c) => {
+app.post('/upload-url', uploadRateLimit, zValidator('json', createRecordingSchema), async (c) => {
   const { matchId, puuid, region, duration, fileSize } = c.req.valid('json');
 
   try {
@@ -204,7 +223,7 @@ app.post('/upload-url', zValidator('json', createRecordingSchema), async (c) => 
 });
 
 // PUT /recordings/:id/upload - Upload video directly
-app.put('/:id/upload', async (c) => {
+app.put('/:id/upload', uploadRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -270,7 +289,7 @@ app.put('/:id/upload', async (c) => {
 });
 
 // GET /recordings/:id/video - Stream video (for analysis page) with Range support
-app.get('/:id/video', async (c) => {
+app.get('/:id/video', readRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -344,7 +363,7 @@ app.get('/:id/video', async (c) => {
 });
 
 // POST /recordings/:id/clips - Upload a video clip with frames for AI analysis
-app.post('/:id/clips', async (c) => {
+app.post('/:id/clips', uploadRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -434,7 +453,7 @@ app.post('/:id/clips', async (c) => {
 });
 
 // GET /recordings/:id/clips/:clipIndex/frames - Get frames for a clip
-app.get('/:id/clips/:clipIndex/frames', async (c) => {
+app.get('/:id/clips/:clipIndex/frames', readRateLimit, async (c) => {
   const id = c.req.param('id');
   const clipIndex = parseInt(c.req.param('clipIndex'));
 
@@ -474,7 +493,7 @@ app.get('/:id/clips/:clipIndex/frames', async (c) => {
 });
 
 // GET /recordings/:id/frame/:clipIndex/:frameIndex - Get a specific frame image
-app.get('/:id/frame/:clipIndex/:frameIndex', async (c) => {
+app.get('/:id/frame/:clipIndex/:frameIndex', readRateLimit, async (c) => {
   const id = c.req.param('id');
   const clipIndex = parseInt(c.req.param('clipIndex'));
   const frameIndex = parseInt(c.req.param('frameIndex'));
@@ -516,7 +535,7 @@ app.get('/:id/frame/:clipIndex/:frameIndex', async (c) => {
 });
 
 // DELETE /recordings/:matchId - Delete recording
-app.delete('/:matchId', async (c) => {
+app.delete('/:matchId', deleteRateLimit, async (c) => {
   const matchId = c.req.param('matchId');
 
   try {

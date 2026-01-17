@@ -3,8 +3,23 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { Env, Analysis, ApiResponse } from '../types';
 import { generateId } from '../utils/helpers';
+import { fetchMatchData, fetchMatchTimeline, transformMatchData, transformTimelineData } from '../utils/riot-api';
+import { analyzeMatch } from '../lib/analysis';
+import { rateLimit, requireAuth, extractUserId } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Rate limiter for analysis (expensive operations)
+const analysisRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  maxRequests: 10, // 10 analyses per minute max
+});
+
+// Rate limiter for reads
+const readRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+});
 
 // Schema for match data from Riot API
 const matchDataSchema = z.object({
@@ -53,8 +68,148 @@ const createAnalysisSchema = z.object({
   matchData: matchDataSchema,
 });
 
+// Schema for analyze endpoint
+const analyzeSchema = z.object({
+  matchId: z.string().min(1),
+  puuid: z.string().min(1),
+  region: z.string().min(1),
+  save: z.boolean().optional().default(true), // Whether to save to DB
+});
+
+// POST /analysis/analyze - Perform analysis using Riot API data (no video required)
+app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async (c) => {
+  const { matchId, puuid, region, save } = c.req.valid('json');
+
+  try {
+    // Check if analysis already exists
+    const existing = await c.env.DB.prepare(`
+      SELECT * FROM analyses WHERE match_id = ? AND puuid = ?
+    `).bind(matchId, puuid).first();
+
+    if (existing) {
+      // Parse JSON fields and return existing analysis
+      const a = existing as unknown as Record<string, unknown>;
+      const analysis = {
+        id: a.id,
+        matchId: a.match_id,
+        puuid: a.puuid,
+        region: a.region,
+        status: a.status,
+        createdAt: a.created_at,
+        updatedAt: a.updated_at,
+        completedAt: a.completed_at,
+        champion: a.champion,
+        result: a.result,
+        duration: a.duration,
+        gameMode: a.game_mode,
+        kills: a.kills,
+        deaths: a.deaths,
+        assists: a.assists,
+        role: a.role,
+        stats: a.stats ? JSON.parse(a.stats as string) : null,
+        errors: a.errors ? JSON.parse(a.errors as string) : null,
+        tips: a.tips ? JSON.parse(a.tips as string) : null,
+      };
+
+      return c.json<ApiResponse>({
+        success: true,
+        data: { ...analysis, existing: true },
+      });
+    }
+
+    console.log(`Starting analysis for match ${matchId}, puuid ${puuid}`);
+
+    // Fetch match data and timeline from Riot API
+    const [riotMatchData, riotTimeline] = await Promise.all([
+      fetchMatchData(matchId, region, c.env.RIOT_API_KEY),
+      fetchMatchTimeline(matchId, region, c.env.RIOT_API_KEY),
+    ]);
+
+    // Transform to our analysis format
+    const matchData = transformMatchData(riotMatchData);
+    const timelineData = transformTimelineData(riotTimeline);
+
+    // Find player in participants
+    const playerParticipant = matchData.participants.find(p => p.puuid === puuid);
+    if (!playerParticipant) {
+      return c.json<ApiResponse>({
+        success: false,
+        error: 'Player not found in match participants',
+      }, 400);
+    }
+
+    // Run analysis
+    const analysisResult = await analyzeMatch(matchData, timelineData, puuid);
+
+    // Save to database if requested
+    let analysisId: string | null = null;
+    if (save) {
+      analysisId = generateId();
+      const now = new Date().toISOString();
+
+      await c.env.DB.prepare(`
+        INSERT INTO analyses (
+          id, match_id, puuid, region, status,
+          champion, result, duration, game_mode,
+          kills, deaths, assists, role,
+          stats, errors, tips,
+          created_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        analysisId,
+        matchId,
+        puuid,
+        region,
+        playerParticipant.championName,
+        analysisResult.result,
+        analysisResult.duration,
+        matchData.gameMode,
+        playerParticipant.kills,
+        playerParticipant.deaths,
+        playerParticipant.assists,
+        playerParticipant.teamPosition,
+        JSON.stringify(analysisResult.stats),
+        JSON.stringify(analysisResult.errors),
+        JSON.stringify(analysisResult.tips),
+        now,
+        now,
+        now
+      ).run();
+
+      console.log(`Analysis saved with ID: ${analysisId}`);
+    }
+
+    return c.json<ApiResponse>({
+      success: true,
+      data: {
+        id: analysisId,
+        matchId: analysisResult.matchId,
+        puuid: analysisResult.puuid,
+        champion: analysisResult.champion,
+        result: analysisResult.result,
+        duration: analysisResult.duration,
+        gameMode: matchData.gameMode,
+        kills: playerParticipant.kills,
+        deaths: playerParticipant.deaths,
+        assists: playerParticipant.assists,
+        role: playerParticipant.teamPosition,
+        status: 'completed',
+        stats: analysisResult.stats,
+        errors: analysisResult.errors,
+        tips: analysisResult.tips,
+      },
+    });
+  } catch (error) {
+    console.error('Analysis failed:', error);
+    return c.json<ApiResponse>({
+      success: false,
+      error: error instanceof Error ? error.message : 'Analysis failed',
+    }, 500);
+  }
+});
+
 // GET /analysis - List all analyses for a user
-app.get('/', async (c) => {
+app.get('/', readRateLimit, async (c) => {
   const puuid = c.req.query('puuid');
   const limit = parseInt(c.req.query('limit') || '20');
   const offset = parseInt(c.req.query('offset') || '0');
@@ -107,7 +262,7 @@ app.get('/', async (c) => {
 });
 
 // GET /analysis/:id - Get single analysis
-app.get('/:id', async (c) => {
+app.get('/:id', readRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -158,7 +313,7 @@ app.get('/:id', async (c) => {
 });
 
 // GET /analysis/match/:matchId - Get analysis by match ID
-app.get('/match/:matchId', async (c) => {
+app.get('/match/:matchId', readRateLimit, async (c) => {
   const matchId = c.req.param('matchId');
 
   try {
@@ -207,7 +362,7 @@ app.get('/match/:matchId', async (c) => {
 });
 
 // POST /analysis - Create new analysis request (does NOT auto-start)
-app.post('/', zValidator('json', createAnalysisSchema), async (c) => {
+app.post('/', analysisRateLimit, zValidator('json', createAnalysisSchema), async (c) => {
   const { matchId, puuid, region, matchData } = c.req.valid('json');
 
   try {
@@ -281,7 +436,7 @@ app.post('/', zValidator('json', createAnalysisSchema), async (c) => {
 });
 
 // POST /analysis/:id/start - Manually start analysis processing
-app.post('/:id/start', async (c) => {
+app.post('/:id/start', analysisRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -357,7 +512,7 @@ app.post('/:id/start', async (c) => {
 });
 
 // POST /analysis/:id/reanalyze - Re-run analysis with updated AI
-app.post('/:id/reanalyze', async (c) => {
+app.post('/:id/reanalyze', analysisRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {
@@ -413,7 +568,7 @@ app.post('/:id/reanalyze', async (c) => {
 });
 
 // DELETE /analysis/:id - Delete analysis
-app.delete('/:id', async (c) => {
+app.delete('/:id', analysisRateLimit, async (c) => {
   const id = c.req.param('id');
 
   try {

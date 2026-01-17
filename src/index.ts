@@ -5,16 +5,22 @@ import { Env, AnalysisJob } from './types';
 import analysisRoutes from './routes/analysis';
 import recordingsRoutes from './routes/recordings';
 import visionRoutes from './routes/vision';
+import usersRoutes from './routes/users';
+import authRoutes from './routes/auth';
 import { processAnalysisJob } from './services/analyzer';
+import { securityHeaders } from './middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
 // Middleware
 app.use('*', logger());
+app.use('*', securityHeaders);
 app.use('*', cors({
   origin: (origin, c) => {
     const allowedOrigins = [
       c.env.FRONTEND_URL,
+      'https://nexra-ai.app',
+      'https://www.nexra-ai.app',
       'http://localhost:3000',
       'http://localhost:3001',
     ];
@@ -45,6 +51,8 @@ app.get('/health', (c) => {
 app.route('/analysis', analysisRoutes);
 app.route('/recordings', recordingsRoutes);
 app.route('/vision', visionRoutes);
+app.route('/users', usersRoutes);
+app.route('/auth', authRoutes);
 
 // 404 handler
 app.notFound((c) => {

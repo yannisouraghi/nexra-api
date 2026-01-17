@@ -6,7 +6,7 @@ workers_dev = true
 # Environment variables (secrets should be added via wrangler secret put)
 [vars]
 ENVIRONMENT = "production"
-FRONTEND_URL = "https://nexra-jet.vercel.app"
+FRONTEND_URL = "https://www.nexra-ai.app"
 
 # D1 Database
 [[d1_databases]]

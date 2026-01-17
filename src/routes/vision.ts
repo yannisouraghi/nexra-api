@@ -1,13 +1,26 @@
 import { Hono } from 'hono';
 import { Env } from '../types';
+import { rateLimit } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
 // Heartbeat TTL in seconds (consider offline after this)
 const HEARTBEAT_TTL = 30;
 
+// Rate limiting for heartbeat (allow frequent calls since it's called every few seconds)
+const heartbeatRateLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  maxRequests: 30, // 30 heartbeats per minute is reasonable (every 2 seconds)
+});
+
+// Rate limiting for status checks
+const statusRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  maxRequests: 60,
+});
+
 // POST /vision/heartbeat - Nexra Vision sends heartbeat
-app.post('/heartbeat', async (c) => {
+app.post('/heartbeat', heartbeatRateLimit, async (c) => {
   try {
     const body = await c.req.json();
     const { puuid, version } = body;
@@ -36,7 +49,7 @@ app.post('/heartbeat', async (c) => {
 });
 
 // GET /vision/status/:puuid - Check if Nexra Vision is online for a user
-app.get('/status/:puuid', async (c) => {
+app.get('/status/:puuid', statusRateLimit, async (c) => {
   try {
     const puuid = c.req.param('puuid');
 
