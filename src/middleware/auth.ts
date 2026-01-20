@@ -18,9 +18,18 @@ export function extractUserId(c: Context<{ Bindings: Env }>): string | null {
   // Simple format: userId:email - in production use JWT
   const parts = token.split(':');
   if (parts.length >= 1 && parts[0]) {
-    // Accept both user_xxx format (credentials) and UUID format (Google OAuth)
     const userId = parts[0];
-    if (userId.startsWith('user_') || /^[a-f0-9-]{36}$/i.test(userId)) {
+    // Accept multiple ID formats:
+    // - user_xxx format (credentials auth)
+    // - UUID format with hyphens (36 chars)
+    // - Google OAuth numeric IDs (long numeric strings, typically 21 digits)
+    // - Any alphanumeric ID at least 10 chars long (fallback for other OAuth providers)
+    if (
+      userId.startsWith('user_') ||
+      /^[a-f0-9-]{36}$/i.test(userId) ||
+      /^\d{15,30}$/.test(userId) ||
+      /^[a-zA-Z0-9_-]{10,}$/.test(userId)
+    ) {
       return userId;
     }
   }
