@@ -1142,15 +1142,72 @@ Based on these PRECISE stats, deduce what likely happened:
 - A ${matchData.role} must NOT make the same mistakes as another role
 - ALWAYS prioritize errors that cost objectives or the game
 
+## SCORE CALCULATION GUIDELINES (MANDATORY - USE THESE FORMULAS!)
+Calculate scores based on ACTUAL stats. Different performances MUST result in different scores.
+
+### CS SCORE (csScore) - Role specific:
+${matchData.role === 'SUPPORT' ? `- Support: CS doesn't matter, base score = 70
+- Adjust based on roaming effectiveness and pressure created` : matchData.role === 'JUNGLE' ? `- Jungle benchmark: 5.5 CS/min = 50 points, 6.5+ = 80+, 7.5+ = 95+
+- Player has ${csPerMin} CS/min → Calculate proportionally
+- Below 4.5 = under 40 points` : `- Lane benchmark: 7.0 CS/min = 50 points, 8.5+ = 80+, 9.5+ = 95+
+- Player has ${csPerMin} CS/min → Calculate proportionally
+- Below 5.5 = under 40 points, Below 6.5 = under 50 points`}
+
+### VISION SCORE (visionScore):
+${matchData.role === 'SUPPORT' ? `- Support benchmark: 50 vision = 50 points, 70+ = 80+, 90+ = 95+
+- Player has ${matchData.visionScore} → Calculate proportionally` : matchData.role === 'JUNGLE' ? `- Jungle benchmark: 35 vision = 50 points, 50+ = 75+, 65+ = 90+
+- Player has ${matchData.visionScore} → Calculate proportionally` : `- Laner benchmark: 25 vision = 50 points, 35+ = 70+, 45+ = 85+
+- Player has ${matchData.visionScore} → Calculate proportionally`}
+
+### POSITIONING SCORE (positioningScore):
+- Base: Start at 70
+- Each AVOIDABLE death: -8 points (max -40)
+- Each death from bad positioning (gank without vision, facecheck): -10 points
+- Player has ${matchData.deaths} deaths → Analyze each death to calculate
+
+### OBJECTIVE SCORE (objectiveScore):
+- Base: 50 if loss, 65 if win
+- +10 if team got Dragon Soul / +5 per dragon
+- +15 if Baron secured / -10 if Baron thrown
+- Adjust based on player's contribution (${matchData.role} responsibility)
+
+### MACRO SCORE (macroScore):
+- Base: 50
+- Good rotations, timings, wave management: +5 to +15 each
+- Bad split push, AFK farming while team fights: -10 each
+- Missing key objectives for no reason: -15
+
+### OVERALL SCORE FORMULA:
+overallScore = (csScore × ${matchData.role === 'SUPPORT' ? '0.05' : matchData.role === 'JUNGLE' ? '0.15' : '0.25'})
+             + (visionScore × ${matchData.role === 'SUPPORT' ? '0.25' : '0.10'})
+             + (positioningScore × 0.25)
+             + (objectiveScore × ${matchData.role === 'JUNGLE' ? '0.25' : '0.15'})
+             + (macroScore × ${matchData.role === 'SUPPORT' || matchData.role === 'JUNGLE' ? '0.25' : '0.25'})
+             ${matchData.result === 'win' ? '+ 5 (win bonus)' : '- 5 (loss penalty)'}
+
+KDA MODIFIER: KDA of ${kda}
+- KDA >= 4.0: +5 to overall
+- KDA >= 3.0: +2 to overall
+- KDA < 1.5: -5 to overall
+- KDA < 1.0: -10 to overall
+
+DEATH PENALTY: ${matchData.deaths} deaths
+- 0-2 deaths: +5 to overall
+- 3-4 deaths: no modifier
+- 5-6 deaths: -5 to overall
+- 7+ deaths: -10 to overall
+
+**IMPORTANT: The final overallScore MUST reflect the actual performance. A player with ${csPerMin} CS/min, ${matchData.deaths} deaths, ${kda} KDA cannot have the same score as someone with very different stats!**
+
 ## RESPONSE FORMAT (JSON) - MANDATORY PERSONALIZATION
 {
   "stats": {
-    "overallScore": <0-100 overall score>,
-    "csScore": <0-100>,
-    "visionScore": <0-100>,
-    "positioningScore": <0-100>,
-    "objectiveScore": <0-100>,
-    "macroScore": <0-100 macro decision score>,
+    "overallScore": <0-100 - CALCULATED using formulas above, not arbitrary>,
+    "csScore": <0-100 - from CS calculation>,
+    "visionScore": <0-100 - from vision calculation>,
+    "positioningScore": <0-100 - from positioning/deaths calculation>,
+    "objectiveScore": <0-100 - from objective calculation>,
+    "macroScore": <0-100 - from macro calculation>,
     "deathsAnalyzed": ${matchData.deaths},
     "errorsFound": <number>,
     "comparedToRank": [
