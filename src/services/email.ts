@@ -61,7 +61,13 @@ export function createVerificationEmailHtml(code: string, userName?: string): st
           <!-- Logo -->
           <tr>
             <td align="center" style="padding-bottom: 32px;">
-              <img src="https://www.nexra-ai.app/nexra-logo.png" alt="Nexra" width="180" style="display: block; max-width: 180px; height: auto;" />
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin: 0 auto;">
+                <tr>
+                  <td style="background-color: #ffffff; border-radius: 16px; padding: 16px 24px;">
+                    <img src="https://www.nexra-ai.app/nexra-logo.png" alt="Nexra" width="140" style="display: block; max-width: 140px; height: auto;" />
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 
