@@ -68,17 +68,22 @@ const createAnalysisSchema = z.object({
   matchData: matchDataSchema,
 });
 
+// Supported languages for AI analysis
+const SUPPORTED_LANGUAGES = ['en', 'fr', 'es', 'de', 'pt'] as const;
+type AnalysisLanguage = typeof SUPPORTED_LANGUAGES[number];
+
 // Schema for analyze endpoint
 const analyzeSchema = z.object({
   matchId: z.string().min(1),
   puuid: z.string().min(1),
   region: z.string().min(1),
+  language: z.enum(SUPPORTED_LANGUAGES).optional().default('en'),
   save: z.boolean().optional().default(true), // Whether to save to DB
 });
 
 // POST /analysis/analyze - Perform analysis using Riot API data (no video required)
 app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async (c) => {
-  const { matchId, puuid, region, save } = c.req.valid('json');
+  const { matchId, puuid, region, language, save } = c.req.valid('json');
 
   try {
     // Check if analysis already exists
@@ -201,7 +206,7 @@ app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async
     console.log(`Running AI analysis for ${simpleMatchData.champion} ${simpleMatchData.role}...`);
 
     // Run AI analysis with Claude
-    const analysisResult = await analyzeMatchWithAI(simpleMatchData, c.env);
+    const analysisResult = await analyzeMatchWithAI(simpleMatchData, c.env, language);
 
     console.log(`AI analysis complete. Score: ${analysisResult.stats.overallScore}`);
 

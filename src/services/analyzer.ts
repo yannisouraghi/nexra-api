@@ -754,12 +754,22 @@ interface VisionAnalysisResult {
   suggestions: string[];
 }
 
-// Analyze match with Claude AI - Coach mindset with strategic errors
+// Language names for prompt
+const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
+  en: 'English',
+  fr: 'French',
+  es: 'Spanish',
+  de: 'German',
+  pt: 'Portuguese',
+};
+
+// Analyze match with Claude AI - Professional Coach Analysis
 async function analyzeWithClaude(
   matchData: MatchData,
   job: AnalysisJob,
   env: Env,
-  visionAnalysis: VisionAnalysisResult[] = []
+  visionAnalysis: VisionAnalysisResult[] = [],
+  language: string = 'en'
 ): Promise<{
   stats: AnalysisStats;
   errors: GameError[];
@@ -776,158 +786,173 @@ async function analyzeWithClaude(
   const dpm = matchData.duration > 0 ? Math.round(matchData.damageDealt / (matchData.duration / 60)) : 0;
 
   const roleContext = getRoleContext(matchData.role, matchData);
+  const outputLanguage = LANGUAGE_INSTRUCTIONS[language] || 'English';
 
   // Build vision analysis section if available
   let visionSection = '';
   if (visionAnalysis.length > 0) {
     visionSection = `
 
-## ANALYSE VIDÉO DISPONIBLE
-L'IA a analysé ${visionAnalysis.length} clips vidéo de moments clés. Utilise ces informations pour enrichir ton analyse:
+## VIDEO ANALYSIS AVAILABLE
+AI analyzed ${visionAnalysis.length} video clips of key moments. Use this to enrich your analysis:
 
 ${visionAnalysis.map((v, i) => `
-### Clip ${i + 1}: ${v.type} à ${Math.floor(v.timestamp / 60)}:${(v.timestamp % 60).toString().padStart(2, '0')}
-- **Ce qui s'est passé:** ${v.visualAnalysis}
-- **Erreurs détectées visuellement:** ${v.detectedErrors.join(', ') || 'Aucune erreur majeure'}
+### Clip ${i + 1}: ${v.type} at ${Math.floor(v.timestamp / 60)}:${(v.timestamp % 60).toString().padStart(2, '0')}
+- **What happened:** ${v.visualAnalysis}
+- **Detected errors:** ${v.detectedErrors.join(', ') || 'No major errors'}
 - **Suggestions:** ${v.suggestions.join(' | ') || 'N/A'}
 `).join('\n')}
 
-IMPORTANT: Intègre ces observations visuelles dans tes erreurs et conseils. Les erreurs vues dans la vidéo sont des PREUVES - utilise-les pour être plus précis.
+IMPORTANT: Integrate these visual observations into your errors and tips. Video errors are PROOF - use them for precision.
 `;
   }
 
-  // Enhanced prompt for strategic coach-level analysis with PERSONALIZED feedback
-  const prompt = `Tu es un coach professionnel de League of Legends de niveau Challenger. Tu analyses la partie comme un VRAI COACH: peu de feedback, mais des feedbacks à FORT IMPACT et ULTRA PERSONNALISÉS.
+  // Professional Coach Prompt - Actionable feedback for ranking up
+  const prompt = `You are an elite League of Legends coach who has trained professional players and helped thousands climb from Iron to Challenger. Your analysis style is:
+
+1. **DIRECT & HONEST** - No sugarcoating, tell players exactly what they did wrong
+2. **ACTIONABLE** - Every piece of feedback must have a clear action the player can take
+3. **SPECIFIC** - Reference exact moments, stats, and situations from THIS game
+4. **IMPACTFUL** - Focus on the 3-5 mistakes that cost the most LP, not minor details
+
+**CRITICAL: ALL YOUR TEXT OUTPUT IN THE JSON RESPONSE MUST BE WRITTEN IN ${outputLanguage.toUpperCase()}.**
+This includes all titles, descriptions, assessments, tips, coaching notes, and any other text content.
 ${visionSection}
 
-## RÈGLE D'OR: PERSONNALISATION MAXIMALE
-CHAQUE feedback doit être SPÉCIFIQUE à cette partie. Pas de conseils génériques !
-- Cite des MOMENTS PRÉCIS de la game (ex: "à 12:30 quand tu as pris ce fight bot")
-- Référence les STATS RÉELLES du joueur (ex: "avec tes ${matchData.deaths} morts dont 2 avant Drake")
-- Mentionne le CHAMPION joué dans chaque conseil (ex: "sur ${matchData.champion}, tu aurais dû...")
-- Compare avec ce qui AURAIT DÛ se passer (ex: "au lieu de mourir solo top, un reset aurait donné...")
+## YOUR COACHING PHILOSOPHY
+- Players don't improve by hearing "nice try" - they improve by understanding exactly what went wrong
+- The goal is to help this player RANK UP, not to make them feel good
+- Focus on PATTERNS that lose games repeatedly, not one-off mistakes
+- Be specific: "You died at 14:23 by facechecking red buff with no vision" not "improve your vision"
 
-## RÔLE DU JOUEUR: ${matchData.role}
+## GOLDEN RULE: MAXIMUM PERSONALIZATION
+Every piece of feedback must be SPECIFIC to THIS game:
+- Reference EXACT moments (e.g., "at 12:30 when you took that fight bot lane")
+- Use REAL stats (e.g., "with your ${matchData.deaths} deaths, 2 of which happened before Drake")
+- Mention the CHAMPION played (e.g., "on ${matchData.champion}, you should have...")
+- Compare to what SHOULD have happened (e.g., "instead of dying solo top, a reset would have...")
+
+## PLAYER ROLE: ${matchData.role}
 ${roleContext}
 
-## DONNÉES DE LA PARTIE À UTILISER DANS TES FEEDBACKS
+## MATCH DATA TO USE IN YOUR FEEDBACK
 - Champion: ${matchData.champion} (${matchData.role})
-- Résultat: ${matchData.result === 'win' ? 'VICTOIRE' : 'DÉFAITE'}
-- Durée: ${gameDurationMinutes} minutes (${matchData.duration} secondes)
+- Result: ${matchData.result === 'win' ? 'VICTORY' : 'DEFEAT'}
+- Duration: ${gameDurationMinutes} minutes (${matchData.duration} seconds)
 - KDA: ${matchData.kills}/${matchData.deaths}/${matchData.assists} (Ratio: ${kda})
-- CS: ${matchData.cs} total (${csPerMin}/min) - ${matchData.role === 'JUNGLE' ? 'correct pour un jungler' : parseFloat(csPerMin) < 6 ? 'INSUFFISANT, tu perds beaucoup d\'or' : parseFloat(csPerMin) >= 8 ? 'excellent' : 'dans la moyenne'}
-- Vision Score: ${matchData.visionScore} - ${matchData.role === 'SUPPORT' ? (matchData.visionScore < 40 ? 'TROP BAS pour un support' : 'correct') : matchData.visionScore < 20 ? 'tu dois poser plus de wards' : 'acceptable'}
-${matchData.wardsPlaced !== undefined ? `- Wards posées: ${matchData.wardsPlaced} | Wards détruites: ${matchData.wardsKilled || 0} | Pinks: ${matchData.detectorWardsPlaced || 0}` : ''}
-- Or total: ${matchData.goldEarned} (${Math.round(matchData.goldEarned / gameDurationMinutes)} gold/min)
-- Dégâts: ${matchData.damageDealt} (${dpm} DPM) - ${matchData.role === 'SUPPORT' ? 'normal pour un support' : dpm < 400 ? 'TRÈS BAS, tu n\'as pas été présent dans les fights' : dpm > 700 ? 'bon output de dégâts' : 'dans la moyenne'}
-${matchData.damageDealtToObjectives ? `- Dégâts aux objectifs: ${matchData.damageDealtToObjectives}` : ''}
-${matchData.objectives ? `- Objectifs équipe: ${matchData.objectives.dragonKills} Dragons, ${matchData.objectives.baronKills} Barons, ${matchData.objectives.heraldKills} Heralds` : ''}
-${matchData.teamGold && matchData.enemyTeamGold ? `- État de la game: ${matchData.teamGold > matchData.enemyTeamGold ? 'ton équipe menait de ' + (matchData.teamGold - matchData.enemyTeamGold) + ' gold' : 'ton équipe était en retard de ' + (matchData.enemyTeamGold - matchData.teamGold) + ' gold'}` : ''}
-${matchData.champLevel ? `- Niveau final: ${matchData.champLevel}` : ''}
-${matchData.rank ? `- Classement dans la game: ${matchData.rank}/10 ${matchData.rank <= 3 ? '(Top performer)' : matchData.rank >= 8 ? '(Underperforming)' : ''}` : ''}
+- CS: ${matchData.cs} total (${csPerMin}/min) - ${matchData.role === 'JUNGLE' ? 'acceptable for jungler' : parseFloat(csPerMin) < 6 ? 'INSUFFICIENT, losing a lot of gold' : parseFloat(csPerMin) >= 8 ? 'excellent' : 'average'}
+- Vision Score: ${matchData.visionScore} - ${matchData.role === 'SUPPORT' ? (matchData.visionScore < 40 ? 'TOO LOW for a support' : 'acceptable') : matchData.visionScore < 20 ? 'need to place more wards' : 'acceptable'}
+${matchData.wardsPlaced !== undefined ? `- Wards placed: ${matchData.wardsPlaced} | Wards destroyed: ${matchData.wardsKilled || 0} | Control wards: ${matchData.detectorWardsPlaced || 0}` : ''}
+- Total gold: ${matchData.goldEarned} (${Math.round(matchData.goldEarned / gameDurationMinutes)} gold/min)
+- Damage: ${matchData.damageDealt} (${dpm} DPM) - ${matchData.role === 'SUPPORT' ? 'normal for support' : dpm < 400 ? 'VERY LOW, not present in fights' : dpm > 700 ? 'good damage output' : 'average'}
+${matchData.damageDealtToObjectives ? `- Objective damage: ${matchData.damageDealtToObjectives}` : ''}
+${matchData.objectives ? `- Team objectives: ${matchData.objectives.dragonKills} Dragons, ${matchData.objectives.baronKills} Barons, ${matchData.objectives.heraldKills} Heralds` : ''}
+${matchData.teamGold && matchData.enemyTeamGold ? `- Game state: ${matchData.teamGold > matchData.enemyTeamGold ? 'your team was ahead by ' + (matchData.teamGold - matchData.enemyTeamGold) + ' gold' : 'your team was behind by ' + (matchData.enemyTeamGold - matchData.teamGold) + ' gold'}` : ''}
+${matchData.champLevel ? `- Final level: ${matchData.champLevel}` : ''}
+${matchData.rank ? `- In-game rank: ${matchData.rank}/10 ${matchData.rank <= 3 ? '(Top performer)' : matchData.rank >= 8 ? '(Underperforming)' : ''}` : ''}
 
 ### MULTIKILLS & HIGHLIGHTS
-${matchData.firstBloodKill ? '- First Blood: OUI' : ''}${matchData.firstTowerKill ? ' | First Tower: OUI' : ''}
+${matchData.firstBloodKill ? '- First Blood: YES' : ''}${matchData.firstTowerKill ? ' | First Tower: YES' : ''}
 ${matchData.doubleKills ? `- Double kills: ${matchData.doubleKills}` : ''}${matchData.tripleKills ? ` | Triple kills: ${matchData.tripleKills}` : ''}${matchData.quadraKills ? ` | Quadra kills: ${matchData.quadraKills}` : ''}${matchData.pentaKills ? ` | PENTAKILL: ${matchData.pentaKills}` : ''}
 
-${matchData.teammates && matchData.teammates.length > 0 ? `### COMPOSITION D'ÉQUIPE (Tes alliés)
+${matchData.teammates && matchData.teammates.length > 0 ? `### TEAM COMPOSITION (Your allies)
 ${matchData.teammates.map(t => `- ${t.championName}: ${t.kills}/${t.deaths}/${t.assists}`).join('\n')}` : ''}
 
-${matchData.enemies && matchData.enemies.length > 0 ? `### ÉQUIPE ENNEMIE
+${matchData.enemies && matchData.enemies.length > 0 ? `### ENEMY TEAM
 ${matchData.enemies.map(e => `- ${e.championName}: ${e.kills}/${e.deaths}/${e.assists}`).join('\n')}` : ''}
 
-## ANALYSE REQUISE
-En te basant sur ces stats PRÉCISES, déduis ce qui s'est probablement passé:
+## ANALYSIS REQUIRED
+Based on these PRECISE stats, deduce what likely happened:
 
-## TYPES D'ERREURS À DÉTECTER (par priorité)
+## ERROR TYPES TO DETECT (by priority)
 
-### PRIORITÉ 1 — ERREURS CRITIQUES (impact direct sur la victoire)
-1. **Objectifs majeurs mal gérés**
-   - Dragon/Soul donné sans contest alors que l'équipe est vivante
-   - Baron/Herald lancé sans vision
-   - Baron perdu après un pick-off gagnant
-   - Contest d'objectif en infériorité numérique
-   - Absence de reset avant un objectif clé
+### PRIORITY 1 — CRITICAL ERRORS (direct impact on victory)
+1. **Major objectives mismanaged**
+   - Dragon/Soul given away without contest while team is alive
+   - Baron/Herald started without vision
+   - Baron lost after winning a pick-off
+   - Contesting objectives while outnumbered
+   - No reset before a key objective
 
-2. **Deaths inutiles avant objectifs**
-   - Mort isolée 30-90 secondes avant Dragon/Baron
-   - Facecheck sans vision
-   - Overextend sans information ennemie
-   - Mort en side lane sans pression d'objectif
+2. **Useless deaths before objectives**
+   - Isolated death 30-90 seconds before Dragon/Baron
+   - Facecheck without vision
+   - Overextend without enemy information
+   - Death in side lane without objective pressure
 
-3. **Power spikes ignorés ou mal exploités**
-   - Item clé terminé sans prise d'initiative
-   - Fight forcé avant complétion d'un item majeur
-   - Back trop tard retardant un power spike
-   - Mauvais timing de reset avant un fight important
+3. **Power spikes ignored or poorly exploited**
+   - Key item completed without taking initiative
+   - Fight forced before completing a major item
+   - Late back delaying a power spike
+   - Bad reset timing before an important fight
 
-4. **Mauvaise répartition macro sur la map**
-   - 5 joueurs mid sans objectif actif
-   - Mauvais split push (sans pression cross-map)
-   - Aucun joueur en side lane en mid/late game
-   - Défense ou push sur la mauvaise lane
+4. **Poor macro distribution on the map**
+   - 5 players mid without an active objective
+   - Bad split push (without cross-map pressure)
+   - No player in side lane during mid/late game
+   - Defense or push on the wrong lane
 
-### PRIORITÉ 2 — ERREURS MAJEURES (fort impact situationnel)
-5. **Vision insuffisante autour des objectifs**
-   - Absence de wards avant Dragon/Baron
-   - Aucun sweep avant contest
-   - Vision placée trop tard
-   - Vision non défendue
+### PRIORITY 2 — MAJOR ERRORS (high situational impact)
+5. **Insufficient vision around objectives**
+   - No wards before Dragon/Baron
+   - No sweep before contesting
+   - Vision placed too late
+   - Vision not defended
 
-6. **Mauvais déroulement des teamfights**
-   - Mauvais target focus
-   - Engage sans follow-up
-   - Carry hors position
-   - Fight forcé en désavantage numérique
+6. **Poor teamfight execution**
+   - Bad target focus
+   - Engage without follow-up
+   - Carry out of position
+   - Fight forced while outnumbered
 
-7. **Mauvais back timings**
-   - Back trop tard avant un objectif
-   - Back désynchronisé entre joueurs
-   - Fight sans items complétés
-   - Défense d'objectif sans ressources
+7. **Bad back timings**
+   - Back too late before an objective
+   - Desynchronized backs between players
+   - Fight without completed items
+   - Defending objective without resources
 
-### PRIORITÉ 3 — ERREURS MODÉRÉES (impact cumulatif)
-8. **Mauvaise gestion des waves**
-   - Push sans vision
-   - Waves non préparées avant objectif
-   - Freeze cassé inutilement
-   - Perte de waves sans compensation
+### PRIORITY 3 — MODERATE ERRORS (cumulative impact)
+8. **Poor wave management**
+   - Push without vision
+   - Waves not prepared before objective
+   - Freeze broken unnecessarily
+   - Waves lost without compensation
 
-9. **Mauvaise gestion du split push**
-   - Split sans pression ailleurs
-   - Split trop profond sans vision
-   - Absence de TP ou de couverture
-   - Mauvais timing de regroupement
+9. **Poor split push management**
+   - Split without pressure elsewhere
+   - Split too deep without vision
+   - No TP or coverage
+   - Bad regrouping timing
 
-10. **Mauvaise utilisation des timings ennemis**
-    - Non-exploitation d'un death timer
-    - Non-punition d'un back ennemi
-    - Pas de prise d'objectif après un avantage
+10. **Poor use of enemy timings**
+    - Not exploiting a death timer
+    - Not punishing an enemy back
+    - No objective taken after an advantage
 
-### PRIORITÉ 4 — ERREURS MINEURES (à filtrer, mentionner seulement si très récurrent)
-11. Trades défavorables répétés en lane
-12. Mauvaise utilisation des summoners
-13. Inefficacité individuelle isolée
+### PRIORITY 4 — MINOR ERRORS (filter, mention only if very recurrent)
+11. Repeated unfavorable trades in lane
+12. Poor use of summoner spells
+13. Isolated individual inefficiency
 
-## RÈGLES DU COACH
-- Tu es un coach EXPÉRIMENTÉ: peu de feedback mais à FORT IMPACT
-- Concentre-toi sur les erreurs MACRO et STRATÉGIQUES, pas les micro-plays
-- CHAQUE erreur doit être liée au RÔLE du joueur (${matchData.role})
-- Si le joueur est mort ${matchData.deaths} fois, analyse POURQUOI ces morts étaient évitables
-- Un ${matchData.role} ne doit PAS faire les mêmes erreurs qu'un autre rôle
-- Priorise TOUJOURS les erreurs qui ont coûté des objectifs ou la partie
+## COACH RULES
+- You are an EXPERIENCED coach: few feedbacks but HIGH IMPACT
+- Focus on MACRO and STRATEGIC errors, not micro-plays
+- EACH error must be related to the player's ROLE (${matchData.role})
+- If the player died ${matchData.deaths} times, analyze WHY these deaths were avoidable
+- A ${matchData.role} must NOT make the same mistakes as another role
+- ALWAYS prioritize errors that cost objectives or the game
 
-## FORMAT DE RÉPONSE (JSON) - PERSONNALISATION OBLIGATOIRE
+## RESPONSE FORMAT (JSON) - MANDATORY PERSONALIZATION
 {
   "stats": {
-    "overallScore": <0-100 score global>,
+    "overallScore": <0-100 overall score>,
     "csScore": <0-100>,
     "visionScore": <0-100>,
     "positioningScore": <0-100>,
     "objectiveScore": <0-100>,
-    "macroScore": <0-100 score de décisions macro>,
+    "macroScore": <0-100 macro decision score>,
     "deathsAnalyzed": ${matchData.deaths},
-    "errorsFound": <nombre>,
+    "errorsFound": <number>,
     "comparedToRank": [
       {"metric": "CS/min", "yours": ${csPerMin}, "average": ${matchData.role === 'SUPPORT' ? '1.5' : matchData.role === 'JUNGLE' ? '5.5' : '7.0'}, "percentile": <0-100>},
       {"metric": "Vision Score", "yours": ${matchData.visionScore}, "average": ${matchData.role === 'SUPPORT' ? '50' : matchData.role === 'JUNGLE' ? '35' : '25'}, "percentile": <0-100>},
@@ -941,76 +966,113 @@ En te basant sur ces stats PRÉCISES, déduis ce qui s'est probablement passé:
       "type": "<objective|death-timing|power-spike|macro-positioning|vision|teamfight|back-timing|wave-management|split-push|timing-exploitation>",
       "severity": "<critical|high|medium|low>",
       "priority": <1-4>,
-      "title": "<5 mots max - percutant, ex: 'Mort inutile avant Drake'>",
-      "description": "<PERSONNALISÉ! Ex: 'À environ 18:00, tu es mort en facecheck dans la jungle ennemie avec ton ${matchData.champion}. Cette mort a coûté le 3ème Drake à ton équipe car tu étais le seul avec du DPS. En tant que ${matchData.role}, tu ne dois JAMAIS facecheck sans vision quand un objectif spawn dans 60 secondes.'>",
-      "timestamp": <secondes>,
-      "suggestion": "<PERSONNALISÉ! Ex: 'Sur ${matchData.champion} en ${matchData.role}, avant chaque Drake tu dois: 1) Vérifier ton timer d'objectif, 2) Si <60sec, ne JAMAIS aller en territoire ennemi, 3) Regrouper avec ton équipe et laisser le support scanner.'>",
-      "clipStart": <secondes ou null - UNIQUEMENT pour les erreurs visuelles: morts, fights, positionnement. PAS pour: vision, CS, wave management, itemization>,
-      "clipEnd": <secondes ou null - même règle que clipStart>,
-      "coachingNote": "<PERSONNALISÉ! Ex: 'Un ${matchData.role} Challenger sur ${matchData.champion} avec ton KDA de ${matchData.kills}/${matchData.deaths}/${matchData.assists} aurait joué safe 1 minute avant Drake. Ton ${dpm} DPM montre que tu es important dans les fights - mourir avant un objectif annule tout ton impact.'>",
+      "title": "<5 words max - impactful>",
+      "description": "<PERSONALIZED! Reference specific moments, stats, champion, role>",
+      "timestamp": <seconds>,
+      "suggestion": "<PERSONALIZED! Specific actionable advice for this champion and role>",
+      "clipStart": <seconds or null - ONLY for visual errors: deaths, fights, positioning. NOT for: vision, CS, wave management, itemization>,
+      "clipEnd": <seconds or null - same rule as clipStart>,
+      "coachingNote": "<PERSONALIZED! What a Challenger player would have done differently>",
       "roleSpecific": true,
-      "hasVideoMoment": <true si l'erreur correspond à un MOMENT PRÉCIS visible en vidéo (mort, fight, objectif), false si c'est une stat globale (vision score, CS, etc.)>
+      "hasVideoMoment": <true if error corresponds to a SPECIFIC MOMENT visible in video (death, fight, objective), false if it's a global stat (vision score, CS, etc.)>
     }
   ],
   "tips": [
     {
       "id": "tip-1",
       "category": "<Macro|Objectives|Vision|Wave-Management|Teamfighting|Laning|Role-Specific>",
-      "title": "<5 mots max>",
-      "description": "<PERSONNALISÉ! Ex: 'Avec tes ${matchData.deaths} morts cette game sur ${matchData.champion}, tu dois améliorer ton awareness avant les objectifs. Règle des 60 secondes: si Drake/Baron spawn dans 1 min, tu dois être visible et safe, pas en train de pusher une sidelane.'>",
+      "title": "<5 words max>",
+      "description": "<PERSONALIZED! Reference deaths, champion, specific advice>",
       "priority": <1-3>,
-      "exercice": "<PERSONNALISÉ! Ex: 'En Practice Tool sur ${matchData.champion}: pose un timer à 5:00, entraîne-toi à te repositionner vers Drake dès 4:00. Fais ça 10 fois jusqu'à ce que ce soit automatique.'>",
+      "exercice": "<PERSONALIZED! Specific practice drill for this champion>",
       "relatedErrors": ["<error-ids>"]
     }
   ],
   "performanceSummary": {
-    "overallAssessment": "<TRÈS PERSONNALISÉ! Ex: 'Cette game sur ${matchData.champion} ${matchData.role} s'est ${matchData.result === 'win' ? 'soldée par une victoire' : 'terminée en défaite'} en ${gameDurationMinutes} minutes. Ton KDA de ${matchData.kills}/${matchData.deaths}/${matchData.assists} et ton ${csPerMin} CS/min montrent que tu as eu du mal en early game. Tes ${matchData.deaths} morts étaient principalement dues à des prises de risques inutiles avant les objectifs - c'est LA raison principale de ${matchData.result === 'loss' ? 'cette défaite' : 'tes difficultés'}.'>",
-    "keyMistake": "<LA plus grosse erreur avec DÉTAILS, ex: 'Ta mort à ~18:00 avant le 3ème Drake a fait perdre l'objectif et donné un avantage irréversible à l'ennemi'>",
-    "strengths": ["<Basé sur les stats RÉELLES, ex: 'Bon output de dégâts (${dpm} DPM) quand tu étais vivant'>", "<Autre point fort SPÉCIFIQUE>"],
-    "weaknesses": ["<Basé sur les stats RÉELLES, ex: 'Trop de morts évitables (${matchData.deaths}) dont la plupart avant des objectifs'>", "<Autre faiblesse SPÉCIFIQUE>"],
+    "overallAssessment": "<HIGHLY PERSONALIZED! At least 3 sentences with stats. Summarize the game, KDA, CS/min, main issues, and what cost the game or made it difficult>",
+    "keyMistake": "<THE biggest mistake with DETAILS>",
+    "strengths": ["<Based on REAL stats>", "<Another SPECIFIC strength>"],
+    "weaknesses": ["<Based on REAL stats>", "<Another SPECIFIC weakness>"],
     "improvementPlan": {
-      "immediate": ["<SPÉCIFIQUE à cette game, ex: 'Dès ta prochaine game sur ${matchData.champion}, pose un timer mental 60 secondes avant chaque Drake/Baron'>"],
-      "shortTerm": ["<SPÉCIFIQUE au rôle, ex: 'Cette semaine, focus sur mourir moins de 4 fois par game en ${matchData.role}'>"],
-      "longTerm": ["<SPÉCIFIQUE au champion, ex: 'Apprends les power spikes de ${matchData.champion} pour savoir quand tu peux forcer et quand tu dois jouer safe'>"]
+      "immediate": ["<SPECIFIC to this game>"],
+      "shortTerm": ["<SPECIFIC to the role>"],
+      "longTerm": ["<SPECIFIC to the champion>"]
     },
-    "estimatedRank": "<Basé sur TOUTES les stats: CS/min ${csPerMin}, Vision ${matchData.visionScore}, KDA ${kda}, DPM ${dpm}>",
-    "rankUpTip": "<PERSONNALISÉ! Ex: 'Pour monter de ${matchData.result === 'loss' ? 'ce rang' : 'rang'} en ${matchData.role} avec ${matchData.champion}, ta priorité #1 est de réduire tes morts avant objectifs. Avec tes ${matchData.deaths} morts cette game, tu as probablement perdu 2-3 objectifs gratuits.'>"
-  }
+    "estimatedRank": "<Based on ALL stats: CS/min ${csPerMin}, Vision ${matchData.visionScore}, KDA ${kda}, DPM ${dpm}>",
+    "rankUpTip": "<PERSONALIZED! Priority #1 to climb in ${matchData.role} with ${matchData.champion}>"
+  },
+  "deathsAnalysis": [
+    {
+      "deathNumber": 1,
+      "timestamp": <seconds - estimated time of death>,
+      "gamePhase": "<early|mid|late>",
+      "situationContext": "<DETAILED! Describe the game state: 'Around 8 minutes, you were pushing top lane without vision while your jungler was bot side. The enemy Nocturne had just finished his clear and was likely pathing top.'>",
+      "fightAnalysis": {
+        "wasWinnable": <true|false>,
+        "reason": "<DETAILED! 'This fight was NOT winnable because: 1) You were level 5 vs their level 6 (ultimate disadvantage), 2) You had ~500 gold deficit from missing CS, 3) No flash available (used 2 minutes ago), 4) Enemy jungler was nearby'>",
+        "goldState": "<ahead|even|behind by approximately X gold>",
+        "levelState": "<your level vs enemy level>",
+        "cooldownsAvailable": "<Flash, ult, key abilities - what was up/down>"
+      },
+      "whatWentWrong": "<Be specific: 'You overstayed in lane with low HP after a bad trade. Instead of backing with 1200 gold for your spike, you greeded for 2 more minions and got dove 2v1.'>",
+      "whatShouldHaveDone": "<ACTIONABLE! 'After that trade at 7:30 left you at 40% HP, the correct play was to shove the wave and back immediately. Your opponent couldn't freeze because the wave was too big.'>",
+      "deathCost": "<What this death cost: 'This death gave the enemy ~400 gold, 2 tower plates, and denied you ~12 CS. Total swing: approximately 800 gold advantage to the enemy.'>",
+      "coachVerdict": "<critical|avoidable|unlucky|acceptable>"
+    }
+  ]
 }
 
-## RÈGLES DE PERSONNALISATION ABSOLUES
-1. CHAQUE texte doit contenir au moins 1 stat de la partie (KDA, CS, deaths, DPM, etc.)
-2. CHAQUE conseil doit mentionner ${matchData.champion} ou ${matchData.role}
-3. CHAQUE erreur doit avoir un timestamp RÉALISTE pour une game de ${gameDurationMinutes} minutes
-4. Le performanceSummary.overallAssessment doit faire AU MOINS 3 phrases avec des stats
-5. PAS DE CONSEILS GÉNÉRIQUES comme "améliore ton CS" - dis plutôt "avec ${csPerMin} CS/min, tu perds ~1000 gold par rapport à un joueur Gold"
+## DEATHS ANALYSIS RULES
+- Generate ONE entry per death (${matchData.deaths} deaths = ${matchData.deaths} entries)
+- Estimate timestamps based on game flow: early deaths (0-10 min), mid-game deaths (10-25 min), late deaths (25+ min)
+- Use REAL game knowledge: level advantages, item spikes, summoner cooldowns, jungle clear timers
+- Be BRUTALLY HONEST about whether the fight was winnable - use LoL fundamentals:
+  * Level advantages (especially level 6 power spike)
+  * Item completion timings (BF Sword, Lost Chapter, Mythic, etc.)
+  * Summoner spell availability (Flash is a 5-min CD)
+  * Number advantage (1v2, 2v3, etc.)
+  * Vision state and enemy jungle position
+- The "coachVerdict" should be:
+  * "critical" - This death directly lost an objective or the game
+  * "avoidable" - Player made a clear mistake, should have known better
+  * "unlucky" - Bad RNG, unexpected enemy play, or hard to predict
+  * "acceptable" - Trading death for a worthy objective or outplay attempt that was reasonable
+
+## ABSOLUTE PERSONALIZATION RULES
+1. EACH text must contain at least 1 stat from the game (KDA, CS, deaths, DPM, etc.)
+2. EACH advice must mention ${matchData.champion} or ${matchData.role}
+3. EACH error must have a REALISTIC timestamp for a ${gameDurationMinutes} minute game
+4. The performanceSummary.overallAssessment must have AT LEAST 3 sentences with stats
+5. NO GENERIC ADVICE like "improve your CS" - instead say "with ${csPerMin} CS/min, you're losing ~1000 gold compared to a Gold player"
 
 IMPORTANT:
-- Maximum 3-5 erreurs IMPORTANTES, pas une liste exhaustive
-- Chaque erreur DOIT être pertinente pour ${matchData.role} jouant ${matchData.champion}
-- Sois DIRECT et HONNÊTE comme un vrai coach - cite des CHIFFRES
-- Focus sur ce qui fait PERDRE des games, pas sur les détails mineurs
+- Maximum 3-5 IMPORTANT errors, not an exhaustive list
+- Each error MUST be relevant for ${matchData.role} playing ${matchData.champion}
+- Be DIRECT and HONEST like a real coach - cite NUMBERS
+- Focus on what LOSES games, not minor details
 
-## RÈGLES POUR LES CLIPS VIDÉO (clipStart/clipEnd)
-CRITIQUE: Ne mets clipStart et clipEnd QUE pour les erreurs qui ont un MOMENT PRÉCIS visible en vidéo:
-✅ INCLURE clips pour:
-- Morts (death-timing) - on peut voir le joueur mourir
-- Teamfights mal joués - on peut voir le positionnement
-- Objectifs ratés - on peut voir le fight autour du Dragon/Baron
-- Mauvais positionnement - on peut voir où le joueur était
+## VIDEO CLIP RULES (clipStart/clipEnd)
+CRITICAL: Only set clipStart and clipEnd for errors that have a SPECIFIC MOMENT visible in video:
+✅ INCLUDE clips for:
+- Deaths (death-timing) - you can see the player die
+- Poorly played teamfights - you can see positioning
+- Failed objectives - you can see the fight around Dragon/Baron
+- Bad positioning - you can see where the player was
 
-❌ NE PAS INCLURE clips pour:
-- Vision insuffisante - c'est une stat globale, pas un moment
-- CS manqués - pas intéressant à revoir en vidéo
-- Wave management - trop abstrait pour un clip
-- Itemization - pas de moment vidéo
-- Back timing - difficile à montrer
+❌ DO NOT INCLUDE clips for:
+- Insufficient vision - it's a global stat, not a moment
+- Missed CS - not interesting to review in video
+- Wave management - too abstract for a clip
+- Itemization - no video moment
+- Back timing - hard to show
 
-Si l'erreur n'a PAS de moment précis visible, mets clipStart: null et clipEnd: null`;
+If the error does NOT have a specific visible moment, set clipStart: null and clipEnd: null
+
+REMINDER: Write ALL text content in ${outputLanguage.toUpperCase()}.`;
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 4000,
+    max_tokens: 8000, // Increased for detailed deaths analysis
     messages: [
       {
         role: 'user',
@@ -1031,11 +1093,31 @@ Si l'erreur n'a PAS de moment précis visible, mets clipStart: null et clipEnd: 
     throw new Error('Failed to parse Claude response as JSON');
   }
 
+  // Death analysis type
+  interface DeathAnalysisEntry {
+    deathNumber: number;
+    timestamp: number;
+    gamePhase: 'early' | 'mid' | 'late';
+    situationContext: string;
+    fightAnalysis: {
+      wasWinnable: boolean;
+      reason: string;
+      goldState: string;
+      levelState: string;
+      cooldownsAvailable: string;
+    };
+    whatWentWrong: string;
+    whatShouldHaveDone: string;
+    deathCost: string;
+    coachVerdict: 'critical' | 'avoidable' | 'unlucky' | 'acceptable';
+  }
+
   const analysis = JSON.parse(jsonMatch[0]) as {
     stats: AnalysisStats;
     errors: Array<GameError & { clipStart?: number; clipEnd?: number; coachingNote?: string; priority?: number; roleSpecific?: boolean }>;
     tips: Array<CoachingTip & { exercice?: string; relatedErrors?: string[] }>;
     performanceSummary?: PerformanceSummary & { keyMistake?: string };
+    deathsAnalysis?: DeathAnalysisEntry[];
   };
 
   // Add IDs to errors and tips if missing
@@ -1178,9 +1260,12 @@ Si l'erreur n'a PAS de moment précis visible, mets clipStart: null et clipEnd: 
 
   console.log(`Generated ${clips.length} relevant clips for analysis`);
 
-  // Store performance summary in stats if available
+  // Store performance summary and deaths analysis in stats if available
   if (analysis.performanceSummary) {
     (analysis.stats as AnalysisStats & { performanceSummary?: PerformanceSummary }).performanceSummary = analysis.performanceSummary;
+  }
+  if (analysis.deathsAnalysis) {
+    (analysis.stats as AnalysisStats & { deathsAnalysis?: typeof analysis.deathsAnalysis }).deathsAnalysis = analysis.deathsAnalysis;
   }
 
   return {
@@ -1220,13 +1305,25 @@ export interface SimpleMatchData {
   enemies?: Array<{ championName: string; kills: number; deaths: number; assists: number }>;
 }
 
+// Supported languages for AI analysis output
+export type AnalysisLanguage = 'en' | 'fr' | 'es' | 'de' | 'pt';
+
+const LANGUAGE_NAMES: Record<AnalysisLanguage, string> = {
+  en: 'English',
+  fr: 'French',
+  es: 'Spanish',
+  de: 'German',
+  pt: 'Portuguese',
+};
+
 /**
  * Analyze a match using Claude AI - simplified version for API calls
  * This function can be used without video analysis or job queue
  */
 export async function analyzeMatchWithAI(
   matchData: SimpleMatchData,
-  env: Env
+  env: Env,
+  language: AnalysisLanguage = 'en'
 ): Promise<{
   stats: AnalysisStats;
   errors: GameError[];
@@ -1267,5 +1364,5 @@ export async function analyzeMatchWithAI(
   };
 
   // Call the AI analysis function without vision analysis
-  return analyzeWithClaude(internalMatchData, minimalJob, env, []);
+  return analyzeWithClaude(internalMatchData, minimalJob, env, [], language);
 }
