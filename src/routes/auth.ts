@@ -98,21 +98,38 @@ app.post('/register', authRateLimit, async (c) => {
     const passwordHash = await hashPassword(body.password);
     const userId = generateUserId();
     const now = new Date().toISOString();
+    const normalizedEmail = body.email.toLowerCase();
 
-    // Create user with free credits (credits assigned server-side only, never from client)
+    // Check if this email has already received free credits before
+    // (protection against delete/recreate account abuse)
+    const alreadyReceivedCredits = await c.env.DB.prepare(
+      'SELECT 1 FROM used_free_credits WHERE LOWER(email) = ?'
+    ).bind(normalizedEmail).first();
+
+    // Determine credits to give: 0 if already received, FREE_CREDITS otherwise
+    const creditsToGive = alreadyReceivedCredits ? 0 : FREE_CREDITS_FOR_NEW_USERS;
+
+    // Create user with credits (server-side only, never from client)
     await c.env.DB.prepare(`
       INSERT INTO users (id, email, name, password_hash, auth_provider, credits, created_at, updated_at, last_login_at)
       VALUES (?, ?, ?, ?, 'credentials', ?, ?, ?, ?)
     `).bind(
       userId,
-      body.email.toLowerCase(),
-      body.name || body.email.split('@')[0],
+      normalizedEmail,
+      body.name || normalizedEmail.split('@')[0],
       passwordHash,
-      FREE_CREDITS_FOR_NEW_USERS,
+      creditsToGive,
       now,
       now,
       now
     ).run();
+
+    // If this email hasn't received free credits yet, record it
+    if (!alreadyReceivedCredits) {
+      await c.env.DB.prepare(
+        'INSERT OR IGNORE INTO used_free_credits (email, received_at) VALUES (?, ?)'
+      ).bind(normalizedEmail, now).run();
+    }
 
     // Fetch created user
     const newUser = await c.env.DB.prepare(
@@ -128,6 +145,7 @@ app.post('/register', authRateLimit, async (c) => {
         name: newUser?.name,
         image: newUser?.image,
       },
+      freeCreditsGiven: !alreadyReceivedCredits,
     }, 201);
   } catch (error) {
     console.error('Registration error:', error);

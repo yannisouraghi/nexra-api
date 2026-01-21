@@ -79,11 +79,27 @@ app.post('/auth', async (c) => {
       });
     }
 
-    // No existing user - create new one with free credits
+    // No existing user - check if this email has already received free credits before
+    // (protection against delete/recreate account abuse)
+    const alreadyReceivedCredits = await c.env.DB.prepare(
+      'SELECT 1 FROM used_free_credits WHERE LOWER(email) = ?'
+    ).bind(normalizedEmail).first();
+
+    // Determine credits to give: 0 if already received, FREE_CREDITS otherwise
+    const creditsToGive = alreadyReceivedCredits ? 0 : FREE_CREDITS_FOR_NEW_USERS;
+
+    // Create new user
     await c.env.DB.prepare(`
       INSERT INTO users (id, email, name, image, credits, auth_provider, created_at, updated_at, last_login_at)
       VALUES (?, ?, ?, ?, ?, 'google', ?, ?, ?)
-    `).bind(body.id, normalizedEmail, body.name || null, body.image || null, FREE_CREDITS_FOR_NEW_USERS, now, now, now).run();
+    `).bind(body.id, normalizedEmail, body.name || null, body.image || null, creditsToGive, now, now, now).run();
+
+    // If this email hasn't received free credits yet, record it
+    if (!alreadyReceivedCredits) {
+      await c.env.DB.prepare(
+        'INSERT OR IGNORE INTO used_free_credits (email, received_at) VALUES (?, ?)'
+      ).bind(normalizedEmail, now).run();
+    }
 
     const newUser = await c.env.DB.prepare(
       'SELECT * FROM users WHERE id = ?'
@@ -93,6 +109,7 @@ app.post('/auth', async (c) => {
       success: true,
       user: newUser,
       isNewUser: true,
+      freeCreditsGiven: !alreadyReceivedCredits,
     });
   } catch (error: any) {
     console.error('Error creating/updating user:', error);
