@@ -2,10 +2,6 @@
 import { Context, Next } from 'hono';
 import { Env } from '../types';
 
-// Rate limiting store (in-memory for simple implementation)
-// In production, use KV store for distributed rate limiting
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
-
 // Extract user ID from Authorization header
 // Format: "Bearer user_id:user_email" (signed by frontend)
 export function extractUserId(c: Context<{ Bindings: Env }>): string | null {
@@ -67,45 +63,62 @@ export async function requireOwnership(c: Context<{ Bindings: Env }>, next: Next
   await next();
 }
 
-// Rate limiting middleware
+// Rate limiting middleware using KV for distributed rate limiting
 export function rateLimit(options: {
   windowMs: number;
   maxRequests: number;
+  keyPrefix?: string;
   keyGenerator?: (c: Context<{ Bindings: Env }>) => string;
 }) {
-  const { windowMs, maxRequests, keyGenerator } = options;
+  const { windowMs, maxRequests, keyPrefix = 'ratelimit', keyGenerator } = options;
 
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    // Clean up old entries periodically
-    cleanupRateLimitStore();
-
     // Generate key (IP address by default)
-    const key = keyGenerator
+    const clientKey = keyGenerator
       ? keyGenerator(c)
       : c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
 
+    const kvKey = `${keyPrefix}:${clientKey}`;
     const now = Date.now();
-    const record = rateLimitStore.get(key);
+    const windowEnd = now + windowMs;
 
-    if (record) {
-      if (now > record.resetTime) {
-        // Reset window
-        rateLimitStore.set(key, { count: 1, resetTime: now + windowMs });
-      } else if (record.count >= maxRequests) {
-        // Rate limited
-        const retryAfter = Math.ceil((record.resetTime - now) / 1000);
-        c.header('Retry-After', retryAfter.toString());
-        return c.json(
-          { success: false, error: 'Too many requests. Please try again later.' },
-          429
-        );
-      } else {
-        // Increment counter
-        record.count++;
+    try {
+      // Get current rate limit record from KV
+      const recordStr = await c.env.CACHE.get(kvKey);
+      let record: { count: number; resetTime: number } | null = null;
+
+      if (recordStr) {
+        record = JSON.parse(recordStr);
       }
-    } else {
-      // First request
-      rateLimitStore.set(key, { count: 1, resetTime: now + windowMs });
+
+      if (record) {
+        if (now > record.resetTime) {
+          // Reset window
+          record = { count: 1, resetTime: windowEnd };
+        } else if (record.count >= maxRequests) {
+          // Rate limited
+          const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+          c.header('Retry-After', retryAfter.toString());
+          return c.json(
+            { success: false, error: 'Too many requests. Please try again later.' },
+            429
+          );
+        } else {
+          // Increment counter
+          record.count++;
+        }
+      } else {
+        // First request
+        record = { count: 1, resetTime: windowEnd };
+      }
+
+      // Store updated record with TTL
+      const ttlSeconds = Math.ceil(windowMs / 1000) + 60; // Add 60s buffer
+      await c.env.CACHE.put(kvKey, JSON.stringify(record), { expirationTtl: ttlSeconds });
+
+    } catch (error) {
+      // If KV fails, allow the request but log the error
+      console.error('Rate limit KV error:', error);
     }
 
     await next();
@@ -151,18 +164,4 @@ export function sanitizeInput(input: string, maxLength: number = 1000): string {
     .slice(0, maxLength)
     .replace(/[<>'"]/g, '') // Remove HTML/SQL special chars
     .trim();
-}
-
-// Clean up old rate limit entries during request processing
-// This is called within the rate limit middleware to avoid global scope issues
-function cleanupRateLimitStore() {
-  const now = Date.now();
-  // Only cleanup occasionally to avoid performance impact
-  if (rateLimitStore.size > 1000) {
-    for (const [key, record] of rateLimitStore.entries()) {
-      if (now > record.resetTime + 60000) {
-        rateLimitStore.delete(key);
-      }
-    }
-  }
 }

@@ -407,13 +407,13 @@ app.post('/:id/use-credit', requireOwnership, generalRateLimit, async (c) => {
   }
 });
 
-// Add credits (for purchases - would need payment verification in production)
-// TODO: This should be called by payment webhook, not directly by users
+// Add credits (for purchases - called by Stripe webhook)
 app.post('/:id/add-credits', sensitiveRateLimit, async (c) => {
   const userId = c.req.param('id');
-  const body = await c.req.json<{ amount: number; transactionId?: string }>();
+  const body = await c.req.json<{ credits: number; source?: string; paymentId?: string; amount?: number }>();
 
-  if (!body.amount || body.amount <= 0) {
+  // Validate credits field (not amount - amount is the price in cents)
+  if (!body.credits || body.credits <= 0 || body.credits > 100) {
     return c.json({ success: false, error: 'Invalid credit amount' }, 400);
   }
 
@@ -422,7 +422,7 @@ app.post('/:id/add-credits', sensitiveRateLimit, async (c) => {
 
     await c.env.DB.prepare(`
       UPDATE users SET credits = credits + ?, updated_at = ? WHERE id = ?
-    `).bind(body.amount, now, userId).run();
+    `).bind(body.credits, now, userId).run();
 
     const user = await c.env.DB.prepare(
       'SELECT credits FROM users WHERE id = ?'
@@ -430,12 +430,30 @@ app.post('/:id/add-credits', sensitiveRateLimit, async (c) => {
 
     return c.json({
       success: true,
-      creditsAdded: body.amount,
+      creditsAdded: body.credits,
       totalCredits: user?.credits || 0,
     });
   } catch (error) {
     console.error('Error adding credits:', error);
     return c.json({ success: false, error: 'Failed to add credits' }, 500);
+  }
+});
+
+// Mark onboarding as completed
+app.post('/:id/complete-onboarding', async (c) => {
+  const userId = c.req.param('id');
+
+  try {
+    const now = new Date().toISOString();
+
+    await c.env.DB.prepare(`
+      UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?
+    `).bind(now, userId).run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error completing onboarding:', error);
+    return c.json({ success: false, error: 'Failed to complete onboarding' }, 500);
   }
 });
 

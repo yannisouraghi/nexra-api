@@ -1048,15 +1048,10 @@ These are the REAL deaths from the game. Use this information to provide accurat
 ${matchData.deathDetails.map(d => {
   const minutes = Math.floor(d.timestamp / 60);
   const seconds = d.timestamp % 60;
-  const timeStr = \`\${minutes}:\${seconds.toString().padStart(2, '0')}\`;
-  const gankInfo = d.wasGank ? \`**GANK by \${d.killer}\${d.assistants.length > 0 ? ' + ' + d.assistants.join(', ') : ''}**\` : \`1v1 vs \${d.killer}\`;
-  const goldInfo = d.goldDiff > 0 ? \`+\${d.goldDiff} gold ahead\` : d.goldDiff < 0 ? \`\${d.goldDiff} gold behind\` : 'even gold';
-  return \`**Death #\${d.deathNumber}** at \${timeStr} (\${d.gamePhase} game)
-  - \${gankInfo}
-  - Location: \${d.zone}
-  - Level: You (Lvl \${d.playerLevel}) vs Killer (Lvl \${d.killerLevel}) = \${d.levelDiff > 0 ? '+' + d.levelDiff : d.levelDiff} level diff
-  - Gold state: \${goldInfo}
-  - Was this avoidable? Analyze the situation!\`;
+  const timeStr = minutes + ':' + seconds.toString().padStart(2, '0');
+  const gankInfo = d.wasGank ? '**GANK by ' + d.killer + (d.assistants.length > 0 ? ' + ' + d.assistants.join(', ') : '') + '**' : '1v1 vs ' + d.killer;
+  const goldInfo = d.goldDiff > 0 ? '+' + d.goldDiff + ' gold ahead' : d.goldDiff < 0 ? d.goldDiff + ' gold behind' : 'even gold';
+  return '**Death #' + d.deathNumber + '** at ' + timeStr + ' (' + d.gamePhase + ' game)\n  - ' + gankInfo + '\n  - Location: ' + d.zone + '\n  - Level: You (Lvl ' + d.playerLevel + ') vs Killer (Lvl ' + d.killerLevel + ') = ' + (d.levelDiff > 0 ? '+' + d.levelDiff : d.levelDiff) + ' level diff\n  - Gold state: ' + goldInfo + '\n  - Was this avoidable? Analyze the situation!';
 }).join('\n\n')}
 
 IMPORTANT: Use these EXACT death details in your deathsAnalysis. Do NOT invent deaths or change the details!` : ''}

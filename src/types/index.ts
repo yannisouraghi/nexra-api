@@ -6,6 +6,7 @@ export interface Env {
   CACHE: KVNamespace;
   ANTHROPIC_API_KEY: string;
   RIOT_API_KEY: string;
+  RESEND_API_KEY: string;
   FRONTEND_URL: string;
   ENVIRONMENT: string;
 }
