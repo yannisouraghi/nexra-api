@@ -82,8 +82,21 @@ export async function analyzeMatch(
     gameDuration
   );
 
-  // Generate coaching tips
-  const tips = generateCoachingTips(allErrors, scores);
+  // Normalize role from Riot API format
+  const roleMap: Record<string, 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT' | 'UNKNOWN'> = {
+    'TOP': 'TOP',
+    'JUNGLE': 'JUNGLE',
+    'MIDDLE': 'MID',
+    'MID': 'MID',
+    'BOTTOM': 'ADC',
+    'ADC': 'ADC',
+    'UTILITY': 'SUPPORT',
+    'SUPPORT': 'SUPPORT',
+  };
+  const playerRole = roleMap[playerParticipant.teamPosition?.toUpperCase() || ''] || 'UNKNOWN';
+
+  // Generate coaching tips with role-specific recommendations
+  const tips = generateCoachingTips(allErrors, scores, playerRole);
 
   // Build final result
   const result: AnalysisResult = {

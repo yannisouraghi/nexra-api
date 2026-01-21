@@ -239,11 +239,16 @@ app.delete('/:id', requireOwnership, sensitiveRateLimit, async (c) => {
     }
 
     // Delete related data in order (foreign key constraints)
-    // Delete analyses
+    // Delete by puuid if available
     if (user.riot_puuid) {
       await c.env.DB.prepare('DELETE FROM analyses WHERE puuid = ?').bind(user.riot_puuid).run();
       await c.env.DB.prepare('DELETE FROM recordings WHERE puuid = ?').bind(user.riot_puuid).run();
     }
+
+    // Also delete by user_id to ensure complete cleanup
+    // (handles cases where riot account was unlinked before deletion)
+    await c.env.DB.prepare('DELETE FROM analyses WHERE user_id = ?').bind(userId).run();
+    await c.env.DB.prepare('DELETE FROM recordings WHERE user_id = ?').bind(userId).run();
 
     // Delete user
     await c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();

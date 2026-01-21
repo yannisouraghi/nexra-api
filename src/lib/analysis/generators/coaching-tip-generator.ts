@@ -9,6 +9,7 @@ interface CoachingTip {
   description: string;
   priority: number;
   relatedErrors?: string[];
+  role?: string; // Role-specific tip
 }
 
 // Error type to category mapping
@@ -26,6 +27,9 @@ const ERROR_CATEGORIES: Record<string, string> = {
   'roaming': 'Roaming',
   'teamfight': 'Teamfight',
 };
+
+// Role type
+type Role = 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPPORT' | 'UNKNOWN';
 
 // Pre-defined coaching tips by category
 const COACHING_TIPS: Record<string, CoachingTip[]> = {
@@ -127,6 +131,181 @@ const COACHING_TIPS: Record<string, CoachingTip[]> = {
   ],
 };
 
+// Role-specific coaching tips
+const ROLE_SPECIFIC_TIPS: Record<Role, CoachingTip[]> = {
+  'TOP': [
+    {
+      id: 'top-1',
+      category: 'Toplaner',
+      title: 'Gestion du freeze',
+      description: 'En tant que Toplaner, apprends a freeze pres de ta tour. Ca te protege des ganks et force l\'ennemi a overextend pour farm.',
+      priority: 1,
+      role: 'TOP',
+    },
+    {
+      id: 'top-2',
+      category: 'Toplaner',
+      title: 'TP pour objectifs',
+      description: 'Garde ton TP pour rejoindre les fights bot ou contester Drake. Ne le gaspille pas pour revenir en lane apres un back.',
+      priority: 1,
+      role: 'TOP',
+    },
+    {
+      id: 'top-3',
+      category: 'Toplaner',
+      title: 'Herald timing',
+      description: 'Entre 8 et 14 min, c\'est TON moment pour le Herald. Ping ton jungler et prepare la vision.',
+      priority: 2,
+      role: 'TOP',
+    },
+    {
+      id: 'top-4',
+      category: 'Toplaner',
+      title: 'Split push efficace',
+      description: 'Split push seulement avec vision. Pose 2 wards dans la jungle ennemie avant de push profond.',
+      priority: 2,
+      role: 'TOP',
+    },
+  ],
+  'JUNGLE': [
+    {
+      id: 'jg-1',
+      category: 'Jungler',
+      title: 'Objectifs > Ganks',
+      description: 'Priorise toujours les objectifs (Drake, Herald, Baron) sur les ganks. Un objectif = avantage garanti.',
+      priority: 1,
+      role: 'JUNGLE',
+    },
+    {
+      id: 'jg-2',
+      category: 'Jungler',
+      title: 'Track le jungler ennemi',
+      description: 'Note ou le jungler ennemi a ete vu. S\'il gank top, tu peux prendre son bot side ou gank bot.',
+      priority: 1,
+      role: 'JUNGLE',
+    },
+    {
+      id: 'jg-3',
+      category: 'Jungler',
+      title: 'Gank des lanes pushees',
+      description: 'Ne gank jamais une lane poussee sous tour ennemie. Attend que ton laner push ou gank ailleurs.',
+      priority: 2,
+      role: 'JUNGLE',
+    },
+    {
+      id: 'jg-4',
+      category: 'Jungler',
+      title: 'Vision pre-objectif',
+      description: '1 minute avant Drake/Baron, place des wards et sweep la zone. C\'est TA responsabilite.',
+      priority: 2,
+      role: 'JUNGLE',
+    },
+  ],
+  'MID': [
+    {
+      id: 'mid-1',
+      category: 'Midlaner',
+      title: 'Roam apres push',
+      description: 'Push ta wave AVANT de roam. Sinon tu perds du CS et ton roam peut echouer si ta wave est sous ta tour.',
+      priority: 1,
+      role: 'MID',
+    },
+    {
+      id: 'mid-2',
+      category: 'Midlaner',
+      title: 'Prio pour ton jungler',
+      description: 'Si tu as la prio mid, ton jungler peut envahir et contester les scuttles. Aide-le sur les contests.',
+      priority: 1,
+      role: 'MID',
+    },
+    {
+      id: 'mid-3',
+      category: 'Midlaner',
+      title: 'Track les roams ennemis',
+      description: 'Si ton adversaire disparait, PING immediatement. Meme si tu n\'es pas sur, un ping peut sauver tes teammates.',
+      priority: 2,
+      role: 'MID',
+    },
+    {
+      id: 'mid-4',
+      category: 'Midlaner',
+      title: 'Conteste les objectifs',
+      description: 'Ta position centrale te permet d\'arriver rapidement sur Drake/Herald. Sois present pour chaque contest.',
+      priority: 2,
+      role: 'MID',
+    },
+  ],
+  'ADC': [
+    {
+      id: 'adc-1',
+      category: 'ADC',
+      title: 'Survie = DPS',
+      description: 'Un ADC mort fait 0 degats. Reste TOUJOURS derriere ton frontline et ne facecheck jamais.',
+      priority: 1,
+      role: 'ADC',
+    },
+    {
+      id: 'adc-2',
+      category: 'ADC',
+      title: 'Kiting en teamfight',
+      description: 'Utilise attack-move (A + click) pour kite automatiquement. Frappe la cible la plus proche et safe.',
+      priority: 1,
+      role: 'ADC',
+    },
+    {
+      id: 'adc-3',
+      category: 'ADC',
+      title: 'Farm side lane safe',
+      description: 'Ne farm pas une side lane sans vision. Si tu ne vois pas 3+ ennemis, joue comme s\'ils venaient vers toi.',
+      priority: 2,
+      role: 'ADC',
+    },
+    {
+      id: 'adc-4',
+      category: 'ADC',
+      title: 'Presence sur Drake',
+      description: 'Ton DPS est crucial pour secure Drake rapidement. Sois TOUJOURS present, meme si tu dois perdre quelques CS.',
+      priority: 2,
+      role: 'ADC',
+    },
+  ],
+  'SUPPORT': [
+    {
+      id: 'sup-1',
+      category: 'Support',
+      title: 'Vision = Victoire',
+      description: 'Achete des Control Wards a CHAQUE back. Place-les pres des objectifs ou dans les bushes de la jungle.',
+      priority: 1,
+      role: 'SUPPORT',
+    },
+    {
+      id: 'sup-2',
+      category: 'Support',
+      title: 'Peel ton ADC',
+      description: 'En teamfight, ta priorite #1 est de garder ton ADC en vie. Utilise tes CC sur les assassins qui le ciblent.',
+      priority: 1,
+      role: 'SUPPORT',
+    },
+    {
+      id: 'sup-3',
+      category: 'Support',
+      title: 'Roam mid efficace',
+      description: 'Roam mid apres avoir push la wave bot. Previens ton ADC et ward la riviere avant de partir.',
+      priority: 2,
+      role: 'SUPPORT',
+    },
+    {
+      id: 'sup-4',
+      category: 'Support',
+      title: 'Sweep avant objectifs',
+      description: 'Utilise ton Sweeper autour de Drake/Baron 1 min avant le spawn. Deny la vision ennemie est crucial.',
+      priority: 2,
+      role: 'SUPPORT',
+    },
+  ],
+  'UNKNOWN': [],
+};
+
 export function generateCoachingTips(
   errors: DetectedError[],
   scores: {
@@ -135,7 +314,8 @@ export function generateCoachingTips(
     positioningScore: number;
     objectiveScore: number;
     tradingScore: number;
-  }
+  },
+  role: Role = 'UNKNOWN'
 ): CoachingTip[] {
   const tips: CoachingTip[] = [];
   const usedTipIds = new Set<string>();
@@ -151,6 +331,19 @@ export function generateCoachingTips(
     errorIds[type].push(`error-${error.timestamp}`);
   }
 
+  // FIRST: Add 1-2 role-specific tips (highest priority)
+  const roleTips = ROLE_SPECIFIC_TIPS[role] || [];
+  for (const tip of roleTips) {
+    if (tips.length >= 2) break; // Max 2 role-specific tips first
+    if (usedTipIds.has(tip.id)) continue;
+
+    tips.push({
+      ...tip,
+      priority: tips.length + 1,
+    });
+    usedTipIds.add(tip.id);
+  }
+
   // Sort error types by count (most frequent first)
   const sortedTypes = Object.entries(errorCounts)
     .sort((a, b) => b[1] - a[1])
@@ -163,7 +356,7 @@ export function generateCoachingTips(
 
     for (const tip of categoryTips) {
       if (usedTipIds.has(tip.id)) continue;
-      if (tips.length >= 5) break; // Max 5 tips
+      if (tips.length >= 5) break; // Max 5 tips total
 
       tips.push({
         ...tip,
@@ -197,6 +390,17 @@ export function generateCoachingTips(
         tips.push(tip);
         usedTipIds.add(tip.id);
       }
+    }
+  }
+
+  // Add remaining role-specific tips if we have room
+  if (tips.length < 5 && role !== 'UNKNOWN') {
+    for (const tip of roleTips) {
+      if (usedTipIds.has(tip.id)) continue;
+      if (tips.length >= 5) break;
+
+      tips.push(tip);
+      usedTipIds.add(tip.id);
     }
   }
 

@@ -3,8 +3,8 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { Env, Analysis, ApiResponse } from '../types';
 import { generateId } from '../utils/helpers';
-import { fetchMatchData, fetchMatchTimeline, transformMatchData, transformTimelineData } from '../utils/riot-api';
-import { analyzeMatch } from '../lib/analysis';
+import { fetchMatchData } from '../utils/riot-api';
+import { analyzeMatchWithAI, SimpleMatchData } from '../services/analyzer';
 import { rateLimit, requireAuth, extractUserId } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -117,29 +117,93 @@ app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async
       });
     }
 
-    console.log(`Starting analysis for match ${matchId}, puuid ${puuid}`);
+    console.log(`Starting AI analysis for match ${matchId}, puuid ${puuid}`);
 
-    // Fetch match data and timeline from Riot API
-    const [riotMatchData, riotTimeline] = await Promise.all([
-      fetchMatchData(matchId, region, c.env.RIOT_API_KEY),
-      fetchMatchTimeline(matchId, region, c.env.RIOT_API_KEY),
-    ]);
+    // Fetch match data from Riot API
+    const riotMatchData = await fetchMatchData(matchId, region, c.env.RIOT_API_KEY);
+    // Cast to any to access all Riot API fields not in our interface
+    const matchInfo = riotMatchData.info as any;
 
-    // Transform to our analysis format
-    const matchData = transformMatchData(riotMatchData);
-    const timelineData = transformTimelineData(riotTimeline);
-
-    // Find player in participants
-    const playerParticipant = matchData.participants.find(p => p.puuid === puuid);
-    if (!playerParticipant) {
+    // Find player in raw Riot data to get all available stats
+    const riotParticipant = matchInfo.participants.find((p: any) => p.puuid === puuid);
+    if (!riotParticipant) {
       return c.json<ApiResponse>({
         success: false,
         error: 'Player not found in match participants',
       }, 400);
     }
 
-    // Run analysis
-    const analysisResult = await analyzeMatch(matchData, timelineData, puuid);
+    // Get teammates and enemies for context
+    const playerTeamId = riotParticipant.teamId;
+    const teammates = matchInfo.participants
+      .filter((p: any) => p.teamId === playerTeamId && p.puuid !== puuid)
+      .map((p: any) => ({
+        championName: p.championName,
+        kills: p.kills,
+        deaths: p.deaths,
+        assists: p.assists,
+      }));
+    const enemies = matchInfo.participants
+      .filter((p: any) => p.teamId !== playerTeamId)
+      .map((p: any) => ({
+        championName: p.championName,
+        kills: p.kills,
+        deaths: p.deaths,
+        assists: p.assists,
+      }));
+
+    // Get team objectives
+    const teamStats = matchInfo.teams?.find((t: any) => t.teamId === playerTeamId);
+    const objectives = teamStats?.objectives ? {
+      dragonKills: teamStats.objectives.dragon?.kills || 0,
+      baronKills: teamStats.objectives.baron?.kills || 0,
+      heraldKills: teamStats.objectives.riftHerald?.kills || 0,
+      turretKills: teamStats.objectives.tower?.kills || 0,
+    } : undefined;
+
+    // Normalize role
+    const roleMap: Record<string, string> = {
+      'TOP': 'TOP',
+      'JUNGLE': 'JUNGLE',
+      'MIDDLE': 'MID',
+      'MID': 'MID',
+      'BOTTOM': 'ADC',
+      'ADC': 'ADC',
+      'UTILITY': 'SUPPORT',
+      'SUPPORT': 'SUPPORT',
+    };
+    const normalizedRole = roleMap[riotParticipant.teamPosition?.toUpperCase() || ''] || 'UNKNOWN';
+
+    // Build SimpleMatchData for AI analysis
+    const simpleMatchData: SimpleMatchData = {
+      matchId,
+      champion: riotParticipant.championName,
+      role: normalizedRole,
+      result: riotParticipant.win ? 'win' : 'loss',
+      duration: matchInfo.gameDuration,
+      gameMode: matchInfo.gameMode,
+      kills: riotParticipant.kills,
+      deaths: riotParticipant.deaths,
+      assists: riotParticipant.assists,
+      cs: (riotParticipant.totalMinionsKilled || 0) + (riotParticipant.neutralMinionsKilled || 0),
+      visionScore: riotParticipant.visionScore || 0,
+      goldEarned: riotParticipant.goldEarned || riotParticipant.totalGold || 0,
+      damageDealt: riotParticipant.totalDamageDealtToChampions || 0,
+      wardsPlaced: riotParticipant.wardsPlaced,
+      wardsKilled: riotParticipant.wardsKilled,
+      detectorWardsPlaced: riotParticipant.detectorWardsPlaced,
+      damageDealtToObjectives: riotParticipant.damageDealtToObjectives,
+      objectives,
+      teammates,
+      enemies,
+    };
+
+    console.log(`Running AI analysis for ${simpleMatchData.champion} ${simpleMatchData.role}...`);
+
+    // Run AI analysis with Claude
+    const analysisResult = await analyzeMatchWithAI(simpleMatchData, c.env);
+
+    console.log(`AI analysis complete. Score: ${analysisResult.stats.overallScore}`);
 
     // Save to database if requested
     let analysisId: string | null = null;
@@ -160,14 +224,14 @@ app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async
         matchId,
         puuid,
         region,
-        playerParticipant.championName,
-        analysisResult.result,
-        analysisResult.duration,
-        matchData.gameMode,
-        playerParticipant.kills,
-        playerParticipant.deaths,
-        playerParticipant.assists,
-        playerParticipant.teamPosition,
+        simpleMatchData.champion,
+        simpleMatchData.result,
+        simpleMatchData.duration,
+        simpleMatchData.gameMode,
+        simpleMatchData.kills,
+        simpleMatchData.deaths,
+        simpleMatchData.assists,
+        simpleMatchData.role,
         JSON.stringify(analysisResult.stats),
         JSON.stringify(analysisResult.errors),
         JSON.stringify(analysisResult.tips),
@@ -183,16 +247,16 @@ app.post('/analyze', analysisRateLimit, zValidator('json', analyzeSchema), async
       success: true,
       data: {
         id: analysisId,
-        matchId: analysisResult.matchId,
-        puuid: analysisResult.puuid,
-        champion: analysisResult.champion,
-        result: analysisResult.result,
-        duration: analysisResult.duration,
-        gameMode: matchData.gameMode,
-        kills: playerParticipant.kills,
-        deaths: playerParticipant.deaths,
-        assists: playerParticipant.assists,
-        role: playerParticipant.teamPosition,
+        matchId,
+        puuid,
+        champion: simpleMatchData.champion,
+        result: simpleMatchData.result,
+        duration: simpleMatchData.duration,
+        gameMode: simpleMatchData.gameMode,
+        kills: simpleMatchData.kills,
+        deaths: simpleMatchData.deaths,
+        assists: simpleMatchData.assists,
+        role: simpleMatchData.role,
         status: 'completed',
         stats: analysisResult.stats,
         errors: analysisResult.errors,

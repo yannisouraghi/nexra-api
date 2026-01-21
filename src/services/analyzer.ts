@@ -571,50 +571,174 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
   };
 }
 
-// Role-specific coaching context
-function getRoleContext(role: string): string {
+// Role-specific coaching context with detailed benchmarks and priorities
+function getRoleContext(role: string, matchData: MatchData): string {
+  const gameDurationMinutes = Math.floor(matchData.duration / 60);
+  const csPerMin = matchData.duration > 0 ? (matchData.cs / (matchData.duration / 60)).toFixed(1) : '0';
+  const dpm = matchData.duration > 0 ? Math.round(matchData.damageDealt / (matchData.duration / 60)) : 0;
+
   const contexts: Record<string, string> = {
-    'TOP': `En tant que TOPLANER:
-- Tu es souvent en 1v1 isolé, la gestion des waves et le contrôle de la lane est CRUCIALE
+    'TOP': `## ANALYSE SPÉCIFIQUE TOPLANER
+
+### BENCHMARKS TOPLANER (comparés à tes stats)
+| Métrique | Bronze-Silver | Gold-Plat | Diamond+ | TES STATS |
+|----------|---------------|-----------|----------|-----------|
+| CS/min | 5.5-6.5 | 7.0-7.5 | 8.0+ | ${csPerMin} ${parseFloat(csPerMin) < 6.5 ? '⚠️ INSUFFISANT' : parseFloat(csPerMin) >= 8 ? '✅ EXCELLENT' : '➡️ Correct'} |
+| Vision Score | 15-20 | 25-35 | 40+ | ${matchData.visionScore} ${matchData.visionScore < 20 ? '⚠️ TROP BAS' : '➡️ OK'} |
+| Deaths | 5-7 | 3-5 | 2-4 | ${matchData.deaths} ${matchData.deaths > 5 ? '⚠️ TROP DE MORTS' : '➡️ OK'} |
+| DPM | 400-500 | 500-600 | 600+ | ${dpm} |
+
+### ERREURS TYPIQUES TOPLANER À DÉTECTER
+1. **Mort en 1v1 évitable** - Trade forcé sans avantage ou sous le niveau de puissance
+2. **Gank subi sans vision** - Push sans ward, position avancée sans info jungler
+3. **TP mal utilisé** - TP pour farm au lieu de rejoindre un fight décisif bot/drake
+4. **Herald ignoré** - Aucune pression sur Herald entre 8-14 min
+5. **Split push sans vision** - Push profond sans wards = mort certaine
+6. **Mauvais wave management** - Freeze cassé, slow push mal exécuté, back au mauvais moment
+
+### RESPONSABILITÉS TOPLANER
+- Tu es souvent en 1v1 isolé → la gestion des waves est CRUCIALE
 - Le Herald est TON objectif prioritaire (min 8-14)
 - Tu dois créer de la pression split push pour attirer l'attention ennemie
 - Ton TP doit être utilisé pour rejoindre les teamfights bot ou contester Drake
 - Tu dois tracker le jungler ennemi car tu es vulnérable aux ganks
-- En late game, tu dois soit split push soit être avec ton équipe - jamais entre les deux`,
+- En late game: soit split push avec vision, soit groupé avec l'équipe - JAMAIS entre les deux
 
-    'JUNGLE': `En tant que JUNGLER:
+### POINTS CLÉS À ANALYSER POUR CE TOPLANER
+- Combien de morts dues à des ganks non détectés?
+- Le TP a-t-il été utilisé pour des objectifs ou gaspillé?
+- A-t-il participé au Herald?
+- Son CS montre-t-il une bonne gestion de wave?`,
+
+    'JUNGLE': `## ANALYSE SPÉCIFIQUE JUNGLER
+
+### BENCHMARKS JUNGLER (comparés à tes stats)
+| Métrique | Bronze-Silver | Gold-Plat | Diamond+ | TES STATS |
+|----------|---------------|-----------|----------|-----------|
+| CS/min (camps) | 4.5-5.0 | 5.5-6.0 | 6.5+ | ${csPerMin} ${parseFloat(csPerMin) < 5 ? '⚠️ FARM LENTE' : parseFloat(csPerMin) >= 6 ? '✅ BON FARM' : '➡️ Correct'} |
+| Vision Score | 25-35 | 40-50 | 55+ | ${matchData.visionScore} ${matchData.visionScore < 30 ? '⚠️ VISION INSUFFISANTE' : '✅ OK'} |
+| Deaths | 4-6 | 3-5 | 2-4 | ${matchData.deaths} ${matchData.deaths > 5 ? '⚠️ TROP DE MORTS' : '➡️ OK'} |
+| Kill Participation | 40-50% | 55-65% | 70%+ | À estimer |
+
+### ERREURS TYPIQUES JUNGLER À DÉTECTER
+1. **Objectif perdu sans contest** - Dragon/Herald donné gratuitement
+2. **Pathing inefficace** - Camps laissés, temps perdu à errer
+3. **Gank forcé** - Gank une lane poussée sous tour ennemie = échec garanti
+4. **Pas de track jungler ennemi** - Se faire contre-jungle sans réagir
+5. **Mort avant objectif** - Mourir 30-60 sec avant Drake/Baron = auto-lose objectif
+6. **Mauvais smite** - Baron/Drake volé ou raté
+
+### RESPONSABILITÉS JUNGLER
 - Tu es le CHEF D'ORCHESTRE de la macro - tu dictes le tempo de la partie
 - La vision autour des objectifs est TA responsabilité principale
 - Tu dois tracker le jungler ennemi et contester ses camps quand possible
-- Les timings de gank doivent être optimaux (après push de ta lane, summoners down)
-- Tu dois prioriser: Objectifs > Contre-gank > Gank > Farm
-- Herald avant 14 min, Drake soul est WIN CONDITION`,
+- Les timings de gank doivent être optimaux (après push allié, summoners ennemis down)
+- PRIORISATION: Objectifs > Contre-gank > Gank > Farm
+- Herald avant 14 min, Drake Soul est WIN CONDITION
 
-    'MID': `En tant que MIDLANER:
+### POINTS CLÉS À ANALYSER POUR CE JUNGLER
+- Combien d'objectifs majeurs sécurisés vs perdus?
+- Le pathing était-il efficace (camps up = mauvais pathing)?
+- Les ganks étaient-ils sur des lanes gankables?
+- A-t-il été présent pour les objectifs?`,
+
+    'MID': `## ANALYSE SPÉCIFIQUE MIDLANER
+
+### BENCHMARKS MIDLANER (comparés à tes stats)
+| Métrique | Bronze-Silver | Gold-Plat | Diamond+ | TES STATS |
+|----------|---------------|-----------|----------|-----------|
+| CS/min | 6.0-7.0 | 7.5-8.5 | 9.0+ | ${csPerMin} ${parseFloat(csPerMin) < 7 ? '⚠️ CS À AMÉLIORER' : parseFloat(csPerMin) >= 8.5 ? '✅ EXCELLENT' : '➡️ Correct'} |
+| Vision Score | 20-25 | 30-40 | 45+ | ${matchData.visionScore} ${matchData.visionScore < 25 ? '⚠️ PLUS DE WARDS' : '➡️ OK'} |
+| Deaths | 4-6 | 3-5 | 2-4 | ${matchData.deaths} ${matchData.deaths > 5 ? '⚠️ TROP DE MORTS' : '➡️ OK'} |
+| DPM | 450-550 | 550-700 | 750+ | ${dpm} ${dpm < 500 ? '⚠️ DPM BAS' : dpm >= 700 ? '✅ BON DPM' : '➡️ OK'} |
+
+### ERREURS TYPIQUES MIDLANER À DÉTECTER
+1. **Roam raté** - Roam sans push préalable = perte CS + raté
+2. **Pas de prio pour jungler** - Lane perdue = jungler ne peut pas envahir
+3. **Mort solo en lane** - Trade mal calculé ou gank non détecté
+4. **Pas d'assistance objectifs** - Absent sur les contests drake/herald
+5. **Mauvais positionnement teamfight** - Trop devant ou isolé
+6. **Roam ennemi non suivi** - Pas de ping, pas de follow = teammates morts
+
+### RESPONSABILITÉS MIDLANER
 - Tu as le plus d'influence sur la map grâce à ta position centrale
-- Tu dois ROAM pour aider tes sidelanes après avoir push ta wave
+- Tu dois ROAM pour aider tes sidelanes APRÈS avoir push ta wave
 - Tu dois assister ton jungler sur les contests de scuttle et objectifs
 - Ta prio de lane permet à ton jungler d'envahir
-- En teamfight, ton positionnement et ton burst sont clés
-- Tu dois tracker les roams ennemis et ping tes teammates`,
+- En teamfight, ton positionnement et ton burst/DPS sont clés
+- Tu dois tracker les roams ennemis et PING tes teammates
 
-    'ADC': `En tant qu'ADC:
-- Ta SURVIE est la priorité absolue - un ADC mort = 0 DPS
-- Tu dois farm de manière efficace et safe (objectif 8+ CS/min)
-- Tu dois être présent pour CHAQUE Drake (ton DPS est crucial)
-- En teamfight, reste DERRIÈRE ton frontline et kite
+### POINTS CLÉS À ANALYSER POUR CE MIDLANER
+- Les roams étaient-ils bien timés (après push)?
+- A-t-il aidé son jungler sur les objectifs?
+- Son DPM reflète-t-il une présence dans les fights?
+- Les morts étaient-elles en lane ou en roam?`,
+
+    'ADC': `## ANALYSE SPÉCIFIQUE ADC
+
+### BENCHMARKS ADC (comparés à tes stats)
+| Métrique | Bronze-Silver | Gold-Plat | Diamond+ | TES STATS |
+|----------|---------------|-----------|----------|-----------|
+| CS/min | 6.5-7.5 | 8.0-9.0 | 9.5+ | ${csPerMin} ${parseFloat(csPerMin) < 7.5 ? '⚠️ CS CRITIQUE' : parseFloat(csPerMin) >= 9 ? '✅ EXCELLENT' : '➡️ Correct'} |
+| Deaths | 4-6 | 3-5 | 2-4 | ${matchData.deaths} ${matchData.deaths > 5 ? '⚠️ SURVIE CRITIQUE' : matchData.deaths <= 3 ? '✅ BONNE SURVIE' : '➡️ OK'} |
+| DPM | 500-600 | 650-800 | 850+ | ${dpm} ${dpm < 550 ? '⚠️ DPM TRÈS BAS' : dpm >= 750 ? '✅ BON DPM' : '➡️ OK'} |
+| Vision Score | 15-20 | 20-30 | 30+ | ${matchData.visionScore} |
+
+### ERREURS TYPIQUES ADC À DÉTECTER
+1. **Mort en teamfight par mauvais positionnement** - Trop avancé, pas derrière le frontline
+2. **Facecheck sans vision** - JAMAIS facecheck en tant qu'ADC
+3. **Absent sur Drake** - Ton DPS est crucial pour secure Drake
+4. **Farm side lane sans vision** - Push seul = cible facile
+5. **Mauvais target en teamfight** - Focus le tank au lieu du carry accessible
+6. **Kiting insuffisant** - Pas d'utilisation d'auto-attack move
+
+### RESPONSABILITÉS ADC
+- Ta SURVIE est la priorité absolue - un ADC mort = 0 DPS pour l'équipe
+- Tu dois farm de manière efficace ET safe (objectif 8+ CS/min)
+- Tu dois être présent pour CHAQUE Drake (ton DPS est crucial pour secure)
+- En teamfight, reste TOUJOURS DERRIÈRE ton frontline et kite
 - Ne jamais facecheck sans vision - c'est le job du support
-- Ton positionnement en late game décide des teamfights`,
+- Ton positionnement en late game DÉCIDE des teamfights
 
-    'SUPPORT': `En tant que SUPPORT:
+### POINTS CLÉS À ANALYSER POUR CET ADC
+- Les morts étaient-elles dues à un mauvais positionnement?
+- Le DPM est-il cohérent avec le temps passé en vie?
+- A-t-il été présent pour les Drakes?
+- Le CS montre-t-il un farming efficace?`,
+
+    'SUPPORT': `## ANALYSE SPÉCIFIQUE SUPPORT
+
+### BENCHMARKS SUPPORT (comparés à tes stats)
+| Métrique | Bronze-Silver | Gold-Plat | Diamond+ | TES STATS |
+|----------|---------------|-----------|----------|-----------|
+| Vision Score | 35-45 | 50-65 | 75+ | ${matchData.visionScore} ${matchData.visionScore < 40 ? '⚠️ VISION CRITIQUE' : matchData.visionScore >= 60 ? '✅ EXCELLENT' : '➡️ Correct'} |
+| Wards/min | 0.8-1.0 | 1.2-1.5 | 1.8+ | ${matchData.wardsPlaced ? (matchData.wardsPlaced / gameDurationMinutes).toFixed(1) : 'N/A'} |
+| Deaths | 4-6 | 3-5 | 2-4 | ${matchData.deaths} ${matchData.deaths > 5 ? '⚠️ TROP DE MORTS' : '➡️ OK'} |
+| Kill Participation | 50-60% | 65-75% | 80%+ | À estimer |
+
+### ERREURS TYPIQUES SUPPORT À DÉTECTER
+1. **Vision insuffisante** - Pas de wards avant objectifs, pink non utilisées
+2. **Roam mal timé** - Laisser l'ADC 1v2 au mauvais moment
+3. **Engage raté** - Engage sans follow-up ou en désavantage numérique
+4. **Peel inexistant** - ADC meurt car non protégé
+5. **Position trop avancée** - Support meurt en premier = équipe sans utility
+6. **Pas de deny vision** - Sweeper non utilisé, wards ennemies non détruites
+
+### RESPONSABILITÉS SUPPORT
 - La VISION est ta responsabilité principale - tu dois contrôler la map
-- Tu dois roam mid après avoir push la wave bot pour créer des avantages
-- Tu dois peel ton ADC en teamfight - sa survie = ta priorité
+- Tu dois roam mid APRÈS avoir push la wave bot pour créer des avantages
+- Tu dois PEEL ton ADC en teamfight - sa survie = ta priorité
 - Le contrôle de vision autour de Drake/Baron est CRUCIAL
 - Tu dois engager les fights au bon moment ou counter-engager
-- Tu dois tracker les cooldowns ennemis et ping les dangers`,
+- Tu dois tracker les cooldowns ennemis et PING les dangers
 
-    'UNKNOWN': `Analyse générale applicable à tous les rôles.`,
+### POINTS CLÉS À ANALYSER POUR CE SUPPORT
+- Le vision score est-il suffisant pour le rôle?
+- Les wards étaient-elles bien placées (objectifs, jungle)?
+- L'ADC est-il mort par manque de peel?
+- Les engages/disengage étaient-ils bien timés?`,
+
+    'UNKNOWN': `Analyse générale applicable à tous les rôles. Les benchmarks standards s'appliquent.`,
   };
 
   return contexts[role] || contexts['UNKNOWN'];
@@ -651,7 +775,7 @@ async function analyzeWithClaude(
   const kda = ((matchData.kills + matchData.assists) / Math.max(1, matchData.deaths)).toFixed(2);
   const dpm = matchData.duration > 0 ? Math.round(matchData.damageDealt / (matchData.duration / 60)) : 0;
 
-  const roleContext = getRoleContext(matchData.role);
+  const roleContext = getRoleContext(matchData.role, matchData);
 
   // Build vision analysis section if available
   let visionSection = '';
@@ -1065,4 +1189,83 @@ Si l'erreur n'a PAS de moment précis visible, mets clipStart: null et clipEnd: 
     tips: analysis.tips,
     clips,
   };
+}
+
+// Simplified interface for external API calls
+export interface SimpleMatchData {
+  matchId: string;
+  champion: string;
+  role: string;
+  result: 'win' | 'loss';
+  duration: number;
+  gameMode: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  cs: number;
+  visionScore: number;
+  goldEarned: number;
+  damageDealt: number;
+  wardsPlaced?: number;
+  wardsKilled?: number;
+  detectorWardsPlaced?: number;
+  damageDealtToObjectives?: number;
+  objectives?: {
+    dragonKills: number;
+    baronKills: number;
+    heraldKills: number;
+    turretKills: number;
+  };
+  teammates?: Array<{ championName: string; kills: number; deaths: number; assists: number }>;
+  enemies?: Array<{ championName: string; kills: number; deaths: number; assists: number }>;
+}
+
+/**
+ * Analyze a match using Claude AI - simplified version for API calls
+ * This function can be used without video analysis or job queue
+ */
+export async function analyzeMatchWithAI(
+  matchData: SimpleMatchData,
+  env: Env
+): Promise<{
+  stats: AnalysisStats;
+  errors: GameError[];
+  tips: CoachingTip[];
+  clips: VideoClip[];
+}> {
+  // Convert to internal MatchData format
+  const internalMatchData: MatchData = {
+    champion: matchData.champion,
+    result: matchData.result,
+    duration: matchData.duration,
+    gameMode: matchData.gameMode,
+    kills: matchData.kills,
+    deaths: matchData.deaths,
+    assists: matchData.assists,
+    cs: matchData.cs,
+    visionScore: matchData.visionScore,
+    goldEarned: matchData.goldEarned,
+    damageDealt: matchData.damageDealt,
+    role: matchData.role,
+    lane: matchData.role,
+    wardsPlaced: matchData.wardsPlaced,
+    wardsKilled: matchData.wardsKilled,
+    detectorWardsPlaced: matchData.detectorWardsPlaced,
+    damageDealtToObjectives: matchData.damageDealtToObjectives,
+    objectives: matchData.objectives,
+    teammates: matchData.teammates,
+    enemies: matchData.enemies,
+  };
+
+  // Create a minimal job for internal use (only matchId is needed for clip URLs)
+  const minimalJob: AnalysisJob = {
+    analysisId: `api-${generateId()}`,
+    matchId: matchData.matchId,
+    puuid: '',
+    region: '',
+    videoKey: '',
+  };
+
+  // Call the AI analysis function without vision analysis
+  return analyzeWithClaude(internalMatchData, minimalJob, env, []);
 }
