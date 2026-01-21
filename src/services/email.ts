@@ -4,6 +4,7 @@ interface SendEmailOptions {
   to: string;
   subject: string;
   html: string;
+  text?: string;
 }
 
 export async function sendEmail(apiKey: string, options: SendEmailOptions): Promise<boolean> {
@@ -19,6 +20,7 @@ export async function sendEmail(apiKey: string, options: SendEmailOptions): Prom
         to: options.to,
         subject: options.subject,
         html: options.html,
+        ...(options.text && { text: options.text }),
       }),
     });
 
@@ -63,8 +65,8 @@ export function createVerificationEmailHtml(code: string, userName?: string): st
             <td align="center" style="padding-bottom: 32px;">
               <table role="presentation" cellspacing="0" cellpadding="0" style="margin: 0 auto;">
                 <tr>
-                  <td style="background-color: #ffffff; border-radius: 16px; padding: 16px 24px;">
-                    <img src="https://www.nexra-ai.app/nexra-logo.png" alt="Nexra" width="140" style="display: block; max-width: 140px; height: auto;" />
+                  <td style="background-color: #ffffff; border-radius: 12px; padding: 10px 14px;">
+                    <img src="https://www.nexra-ai.app/nexra-logo.png" alt="Nexra" width="48" style="display: block; max-width: 48px; height: auto;" />
                   </td>
                 </tr>
               </table>
@@ -147,4 +149,23 @@ export function createVerificationEmailHtml(code: string, userName?: string): st
 </body>
 </html>
 `;
+}
+
+// Create plain text version of verification email (improves deliverability)
+export function createVerificationEmailText(code: string, userName?: string): string {
+  const greeting = userName ? `Hey ${userName}` : 'Hey';
+
+  return `${greeting},
+
+Welcome to Nexra! Use the code below to verify your email address.
+
+Your verification code: ${code}
+
+This code expires in 15 minutes.
+
+If you didn't create a Nexra account, you can safely ignore this email.
+
+---
+Nexra - AI-Powered League of Legends Coaching
+https://nexra-ai.app`;
 }

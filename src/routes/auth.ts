@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Env } from '../types';
 import { rateLimit } from '../middleware/auth';
-import { sendEmail, generateVerificationCode, createVerificationEmailHtml } from '../services/email';
+import { sendEmail, generateVerificationCode, createVerificationEmailHtml, createVerificationEmailText } from '../services/email';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -220,12 +220,15 @@ app.post('/register', authRateLimit, async (c) => {
       VALUES (?, ?, ?, ?)
     `).bind(normalizedEmail, verificationCode, expiresAt, now).run();
 
-    // Send verification email
-    const emailHtml = createVerificationEmailHtml(verificationCode, body.name || normalizedEmail.split('@')[0]);
+    // Send verification email (with both HTML and plain text for better deliverability)
+    const userName = body.name || normalizedEmail.split('@')[0];
+    const emailHtml = createVerificationEmailHtml(verificationCode, userName);
+    const emailText = createVerificationEmailText(verificationCode, userName);
     const emailSent = await sendEmail(c.env.RESEND_API_KEY, {
       to: normalizedEmail,
       subject: 'Verify your Nexra account',
       html: emailHtml,
+      text: emailText,
     });
 
     if (!emailSent) {
@@ -429,12 +432,15 @@ app.post('/resend-verification', authRateLimit, async (c) => {
       VALUES (?, ?, ?, ?)
     `).bind(normalizedEmail, verificationCode, expiresAt, now).run();
 
-    // Send verification email
-    const emailHtml = createVerificationEmailHtml(verificationCode, user.name || normalizedEmail.split('@')[0]);
+    // Send verification email (with both HTML and plain text for better deliverability)
+    const userName = user.name || normalizedEmail.split('@')[0];
+    const emailHtml = createVerificationEmailHtml(verificationCode, userName);
+    const emailText = createVerificationEmailText(verificationCode, userName);
     const emailSent = await sendEmail(c.env.RESEND_API_KEY, {
       to: normalizedEmail,
       subject: 'Verify your Nexra account',
       html: emailHtml,
+      text: emailText,
     });
 
     if (!emailSent) {
