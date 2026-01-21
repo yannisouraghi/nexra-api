@@ -2,6 +2,21 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Env, AnalysisJob, AnalysisStats, GameError, CoachingTip, VideoClip, RiotMatchData } from '../types';
 import { generateId } from '../utils/helpers';
 
+interface DeathDetail {
+  deathNumber: number;
+  timestamp: number; // in seconds
+  gamePhase: 'early' | 'mid' | 'late';
+  killer: string;
+  assistants: string[];
+  wasGank: boolean;
+  position: { x: number; y: number };
+  zone: string;
+  goldDiff: number;
+  levelDiff: number;
+  playerLevel: number;
+  killerLevel: number;
+}
+
 interface MatchData {
   champion: string;
   result: 'win' | 'loss';
@@ -39,8 +54,12 @@ interface MatchData {
   firstTowerKill?: boolean;
   champLevel?: number;
   rank?: number;
-  teammates?: Array<{ championName: string; kills: number; deaths: number; assists: number; }>;
-  enemies?: Array<{ championName: string; kills: number; deaths: number; assists: number; }>;
+  teammates?: Array<{ championName: string; kills: number; deaths: number; assists: number; role?: string; }>;
+  enemies?: Array<{ championName: string; kills: number; deaths: number; assists: number; role?: string; }>;
+  // New: Enhanced analysis data
+  laneOpponent?: { championName: string; kills: number; deaths: number; assists: number; };
+  matchupInfo?: string; // e.g., "Darius vs Garen - Darius favored"
+  deathDetails?: DeathDetail[];
 }
 
 interface MatchTimeline {
@@ -469,6 +488,47 @@ export async function processAnalysisJob(job: AnalysisJob, env: Env): Promise<vo
   }
 }
 
+// Get map zone from coordinates
+function getZoneName(x: number, y: number, playerTeamId: number): string {
+  const isBlueTeam = playerTeamId === 100;
+
+  // River zones
+  if ((x > 4000 && x < 11000 && y > 4000 && y < 11000) && Math.abs(x - (15000 - y)) < 3000) {
+    if (x < 6000 && y < 6000) return 'Dragon pit';
+    if (x > 9000 && y > 9000) return 'Baron pit';
+    if (y < 7500) return 'River (bot side)';
+    return 'River (top side)';
+  }
+
+  // Blue side jungle
+  if (x < 7000 && y < 7000 && !(x < 3000 && y < 3000)) {
+    return isBlueTeam ? 'Allied jungle (blue side)' : 'Enemy jungle (blue side)';
+  }
+
+  // Red side jungle
+  if (x > 8000 && y > 8000 && !(x > 12000 && y > 12000)) {
+    return isBlueTeam ? 'Enemy jungle (red side)' : 'Allied jungle (red side)';
+  }
+
+  // Lanes
+  if (Math.abs(x - y) < 2000) return 'Mid lane';
+  if (y > x + 2000) return 'Top lane';
+  if (x > y + 2000) return 'Bot lane';
+
+  // Bases
+  if (x < 3000 && y < 3000) return isBlueTeam ? 'Allied base' : 'Enemy base';
+  if (x > 12000 && y > 12000) return isBlueTeam ? 'Enemy base' : 'Allied base';
+
+  return 'Unknown area';
+}
+
+function getGamePhaseFromTimestamp(timestampMs: number): 'early' | 'mid' | 'late' {
+  const minutes = timestampMs / 60000;
+  if (minutes < 14) return 'early';
+  if (minutes < 25) return 'mid';
+  return 'late';
+}
+
 // Fetch match data from Riot API with timeline
 async function fetchMatchData(matchId: string, puuid: string, region: string, env: Env): Promise<MatchData> {
   const regionRouting: Record<string, string> = {
@@ -481,24 +541,26 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
 
   const routingRegion = regionRouting[region] || 'europe';
   const apiUrl = `https://${routingRegion}.api.riotgames.com/lol/match/v5/matches/${matchId}`;
+  const timelineUrl = `https://${routingRegion}.api.riotgames.com/lol/match/v5/matches/${matchId}/timeline`;
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      'X-Riot-Token': env.RIOT_API_KEY,
-    },
-  });
+  // Fetch match data and timeline in parallel
+  const [matchResponse, timelineResponse] = await Promise.all([
+    fetch(apiUrl, { headers: { 'X-Riot-Token': env.RIOT_API_KEY } }),
+    fetch(timelineUrl, { headers: { 'X-Riot-Token': env.RIOT_API_KEY } })
+  ]);
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch match data: ${response.status}`);
+  if (!matchResponse.ok) {
+    throw new Error(`Failed to fetch match data: ${matchResponse.status}`);
   }
 
-  const data = await response.json() as {
+  const data = await matchResponse.json() as {
     info: {
       gameDuration: number;
       gameMode: string;
       queueId: number;
       participants: Array<{
         puuid: string;
+        participantId: number;
         championName: string;
         win: boolean;
         kills: number;
@@ -513,6 +575,7 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
         lane: string;
         role: string;
         teamId: number;
+        champLevel: number;
       }>;
       teams: Array<{
         teamId: number;
@@ -529,6 +592,7 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
   // Find the player by puuid
   const participant = data.info.participants.find(p => p.puuid === puuid) || data.info.participants[0];
   const playerTeam = data.info.teams.find(t => t.teamId === participant.teamId);
+  const playerParticipantId = participant.participantId;
 
   // Calculate team gold totals
   const playerTeamParticipants = data.info.participants.filter(p => p.teamId === participant.teamId);
@@ -545,6 +609,107 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
     'UTILITY': 'SUPPORT',
     '': 'UNKNOWN',
   };
+
+  // Find lane opponent (same role on enemy team)
+  const playerRole = participant.teamPosition;
+  const laneOpponent = enemyTeamParticipants.find(p => p.teamPosition === playerRole);
+
+  // Build teammates and enemies with roles
+  const teammates = playerTeamParticipants
+    .filter(p => p.puuid !== puuid)
+    .map(p => ({
+      championName: p.championName,
+      kills: p.kills,
+      deaths: p.deaths,
+      assists: p.assists,
+      role: roleMap[p.teamPosition] || p.teamPosition || 'UNKNOWN',
+    }));
+
+  const enemies = enemyTeamParticipants.map(p => ({
+    championName: p.championName,
+    kills: p.kills,
+    deaths: p.deaths,
+    assists: p.assists,
+    role: roleMap[p.teamPosition] || p.teamPosition || 'UNKNOWN',
+  }));
+
+  // Extract death details from timeline
+  let deathDetails: DeathDetail[] = [];
+
+  if (timelineResponse.ok) {
+    const timelineData = await timelineResponse.json() as {
+      info: {
+        frames: Array<{
+          timestamp: number;
+          participantFrames: Record<string, {
+            participantId: number;
+            totalGold: number;
+            level: number;
+            position: { x: number; y: number };
+          }>;
+          events: Array<{
+            type: string;
+            timestamp: number;
+            killerId?: number;
+            victimId?: number;
+            assistingParticipantIds?: number[];
+            position?: { x: number; y: number };
+          }>;
+        }>;
+      };
+    };
+
+    let deathNumber = 0;
+    for (const frame of timelineData.info.frames) {
+      for (const event of frame.events) {
+        if (event.type === 'CHAMPION_KILL' && event.victimId === playerParticipantId) {
+          deathNumber++;
+
+          const killer = data.info.participants.find(p => p.participantId === event.killerId);
+          const assistants = (event.assistingParticipantIds || [])
+            .map(id => data.info.participants.find(p => p.participantId === id)?.championName)
+            .filter((name): name is string => !!name);
+
+          const position = event.position || { x: 7500, y: 7500 };
+          const zone = getZoneName(position.x, position.y, participant.teamId);
+
+          // Get gold/level at time of death
+          const frameIndex = Math.floor(event.timestamp / 60000);
+          const currentFrame = timelineData.info.frames[frameIndex] || frame;
+          const playerFrame = currentFrame.participantFrames[playerParticipantId.toString()];
+          const killerFrame = event.killerId ? currentFrame.participantFrames[event.killerId.toString()] : null;
+
+          const goldDiff = playerFrame && killerFrame
+            ? playerFrame.totalGold - killerFrame.totalGold
+            : 0;
+          const levelDiff = playerFrame && killerFrame
+            ? playerFrame.level - killerFrame.level
+            : 0;
+
+          deathDetails.push({
+            deathNumber,
+            timestamp: Math.floor(event.timestamp / 1000),
+            gamePhase: getGamePhaseFromTimestamp(event.timestamp),
+            killer: killer?.championName || 'Unknown',
+            assistants,
+            wasGank: assistants.length >= 1,
+            position,
+            zone,
+            goldDiff,
+            levelDiff,
+            playerLevel: playerFrame?.level || 1,
+            killerLevel: killerFrame?.level || 1,
+          });
+        }
+      }
+    }
+  }
+
+  // Generate matchup info
+  let matchupInfo: string | undefined;
+  if (laneOpponent) {
+    matchupInfo = `${participant.championName} vs ${laneOpponent.championName} in ${roleMap[playerRole] || playerRole}`;
+  }
 
   return {
     champion: participant.championName,
@@ -568,6 +733,17 @@ async function fetchMatchData(matchId: string, puuid: string, region: string, en
       heraldKills: playerTeam.objectives.riftHerald.kills,
       turretKills: playerTeam.objectives.tower.kills,
     } : undefined,
+    teammates,
+    enemies,
+    laneOpponent: laneOpponent ? {
+      championName: laneOpponent.championName,
+      kills: laneOpponent.kills,
+      deaths: laneOpponent.deaths,
+      assists: laneOpponent.assists,
+    } : undefined,
+    matchupInfo,
+    deathDetails,
+    champLevel: participant.champLevel,
   };
 }
 
@@ -841,8 +1017,7 @@ ${roleContext}
 - Duration: ${gameDurationMinutes} minutes (${matchData.duration} seconds)
 - KDA: ${matchData.kills}/${matchData.deaths}/${matchData.assists} (Ratio: ${kda})
 - CS: ${matchData.cs} total (${csPerMin}/min) - ${matchData.role === 'JUNGLE' ? 'acceptable for jungler' : parseFloat(csPerMin) < 6 ? 'INSUFFICIENT, losing a lot of gold' : parseFloat(csPerMin) >= 8 ? 'excellent' : 'average'}
-- Vision Score: ${matchData.visionScore} - ${matchData.role === 'SUPPORT' ? (matchData.visionScore < 40 ? 'TOO LOW for a support' : 'acceptable') : matchData.visionScore < 20 ? 'need to place more wards' : 'acceptable'}
-${matchData.wardsPlaced !== undefined ? `- Wards placed: ${matchData.wardsPlaced} | Wards destroyed: ${matchData.wardsKilled || 0} | Control wards: ${matchData.detectorWardsPlaced || 0}` : ''}
+- Vision Score: ${matchData.visionScore}
 - Total gold: ${matchData.goldEarned} (${Math.round(matchData.goldEarned / gameDurationMinutes)} gold/min)
 - Damage: ${matchData.damageDealt} (${dpm} DPM) - ${matchData.role === 'SUPPORT' ? 'normal for support' : dpm < 400 ? 'VERY LOW, not present in fights' : dpm > 700 ? 'good damage output' : 'average'}
 ${matchData.damageDealtToObjectives ? `- Objective damage: ${matchData.damageDealtToObjectives}` : ''}
@@ -851,15 +1026,40 @@ ${matchData.teamGold && matchData.enemyTeamGold ? `- Game state: ${matchData.tea
 ${matchData.champLevel ? `- Final level: ${matchData.champLevel}` : ''}
 ${matchData.rank ? `- In-game rank: ${matchData.rank}/10 ${matchData.rank <= 3 ? '(Top performer)' : matchData.rank >= 8 ? '(Underperforming)' : ''}` : ''}
 
+${matchData.laneOpponent ? `### LANE MATCHUP
+- **Your champion:** ${matchData.champion}
+- **Lane opponent:** ${matchData.laneOpponent.championName} (${matchData.laneOpponent.kills}/${matchData.laneOpponent.deaths}/${matchData.laneOpponent.assists})
+- **Matchup:** ${matchData.matchupInfo || 'Unknown matchup'}
+Analyze this matchup: Was the player playing the matchup correctly? Did they respect enemy power spikes?` : ''}
+
 ### MULTIKILLS & HIGHLIGHTS
 ${matchData.firstBloodKill ? '- First Blood: YES' : ''}${matchData.firstTowerKill ? ' | First Tower: YES' : ''}
 ${matchData.doubleKills ? `- Double kills: ${matchData.doubleKills}` : ''}${matchData.tripleKills ? ` | Triple kills: ${matchData.tripleKills}` : ''}${matchData.quadraKills ? ` | Quadra kills: ${matchData.quadraKills}` : ''}${matchData.pentaKills ? ` | PENTAKILL: ${matchData.pentaKills}` : ''}
 
 ${matchData.teammates && matchData.teammates.length > 0 ? `### TEAM COMPOSITION (Your allies)
-${matchData.teammates.map(t => `- ${t.championName}: ${t.kills}/${t.deaths}/${t.assists}`).join('\n')}` : ''}
+${matchData.teammates.map(t => `- ${t.championName} (${t.role || 'Unknown'}): ${t.kills}/${t.deaths}/${t.assists}`).join('\n')}` : ''}
 
 ${matchData.enemies && matchData.enemies.length > 0 ? `### ENEMY TEAM
-${matchData.enemies.map(e => `- ${e.championName}: ${e.kills}/${e.deaths}/${e.assists}`).join('\n')}` : ''}
+${matchData.enemies.map(e => `- ${e.championName} (${e.role || 'Unknown'}): ${e.kills}/${e.deaths}/${e.assists}`).join('\n')}` : ''}
+
+${matchData.deathDetails && matchData.deathDetails.length > 0 ? `### EXACT DEATH DETAILS (FROM GAME DATA - USE THESE!)
+These are the REAL deaths from the game. Use this information to provide accurate analysis:
+
+${matchData.deathDetails.map(d => {
+  const minutes = Math.floor(d.timestamp / 60);
+  const seconds = d.timestamp % 60;
+  const timeStr = \`\${minutes}:\${seconds.toString().padStart(2, '0')}\`;
+  const gankInfo = d.wasGank ? \`**GANK by \${d.killer}\${d.assistants.length > 0 ? ' + ' + d.assistants.join(', ') : ''}**\` : \`1v1 vs \${d.killer}\`;
+  const goldInfo = d.goldDiff > 0 ? \`+\${d.goldDiff} gold ahead\` : d.goldDiff < 0 ? \`\${d.goldDiff} gold behind\` : 'even gold';
+  return \`**Death #\${d.deathNumber}** at \${timeStr} (\${d.gamePhase} game)
+  - \${gankInfo}
+  - Location: \${d.zone}
+  - Level: You (Lvl \${d.playerLevel}) vs Killer (Lvl \${d.killerLevel}) = \${d.levelDiff > 0 ? '+' + d.levelDiff : d.levelDiff} level diff
+  - Gold state: \${goldInfo}
+  - Was this avoidable? Analyze the situation!\`;
+}).join('\n\n')}
+
+IMPORTANT: Use these EXACT death details in your deathsAnalysis. Do NOT invent deaths or change the details!` : ''}
 
 ## ANALYSIS REQUIRED
 Based on these PRECISE stats, deduce what likely happened:
@@ -1024,14 +1224,16 @@ Based on these PRECISE stats, deduce what likely happened:
 
 ## DEATHS ANALYSIS RULES
 - Generate ONE entry per death (${matchData.deaths} deaths = ${matchData.deaths} entries)
-- Estimate timestamps based on game flow: early deaths (0-10 min), mid-game deaths (10-25 min), late deaths (25+ min)
+${matchData.deathDetails && matchData.deathDetails.length > 0 ? `- USE THE EXACT DEATH DETAILS PROVIDED ABOVE! Do NOT invent or change timestamps, killers, or assistants.
+- Each death has: exact timestamp, killer name, assistant names (if ganked), zone/location, gold diff, level diff
+- If deathDetails show assistants, it was a GANK - say "ganked by X + Y" not "1v1"` : `- Estimate timestamps based on game flow: early deaths (0-10 min), mid-game deaths (10-25 min), late deaths (25+ min)`}
 - Use REAL game knowledge: level advantages, item spikes, summoner cooldowns, jungle clear timers
 - Be BRUTALLY HONEST about whether the fight was winnable - use LoL fundamentals:
   * Level advantages (especially level 6 power spike)
   * Item completion timings (BF Sword, Lost Chapter, Mythic, etc.)
   * Summoner spell availability (Flash is a 5-min CD)
-  * Number advantage (1v2, 2v3, etc.)
-  * Vision state and enemy jungle position
+  * Number advantage (1v2, 2v3, etc. - CHECK THE ASSISTANTS LIST!)
+  * Position on map (was the player overextended in enemy territory?)
 - The "coachVerdict" should be:
   * "critical" - This death directly lost an objective or the game
   * "avoidable" - Player made a clear mistake, should have known better
