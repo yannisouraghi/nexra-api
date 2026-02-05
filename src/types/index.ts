@@ -7,6 +7,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   RIOT_API_KEY: string;
   RESEND_API_KEY: string;
+  AUTH_SECRET: string;
   FRONTEND_URL: string;
   ENVIRONMENT: string;
 }
@@ -87,7 +88,8 @@ export interface AnalysisJob {
   matchId: string;
   puuid: string;
   region: string;
-  videoKey: string;
+  videoKey?: string;
+  language?: string;
   matchData?: RiotMatchData; // Full match data from Riot API
 }
 

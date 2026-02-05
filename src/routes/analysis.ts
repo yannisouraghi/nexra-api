@@ -3,9 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { Env, Analysis, ApiResponse } from '../types';
 import { generateId } from '../utils/helpers';
-import { fetchMatchData, fetchMatchTimeline } from '../utils/riot-api';
-import { analyzeMatchWithAI, SimpleMatchData } from '../services/analyzer';
-import { extractDeathDetails, extractObjectiveEvents } from '../utils/timeline-extractor';
+import { fetchMatchData } from '../utils/riot-api';
 import { rateLimit, requireAuth, extractUserId } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -81,13 +79,6 @@ const analyzeSchema = z.object({
   language: z.enum(SUPPORTED_LANGUAGES).optional().default('en'),
   save: z.boolean().optional().default(true), // Whether to save to DB
 });
-
-// Helper to update analysis progress in DB
-async function updateAnalysisProgress(db: D1Database, id: string, progress: number, message: string) {
-  await db.prepare(`
-    UPDATE analyses SET progress = ?, progress_message = ?, updated_at = datetime('now') WHERE id = ?
-  `).bind(progress, message, id).run();
-}
 
 // POST /analysis/analyze - Async analysis: returns 202 immediately, processes in background
 app.post('/analyze', requireAuth, analysisRateLimit, zValidator('json', analyzeSchema), async (c) => {
@@ -191,7 +182,7 @@ app.post('/analyze', requireAuth, analysisRateLimit, zValidator('json', analyzeS
         kills, deaths, assists, role,
         progress, progress_message,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 5, 'Fetching game data...', ?, ?)
+      ) VALUES (?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 10, 'Fetching game data...', ?, ?)
     `).bind(
       analysisId, matchId, puuid, region,
       champion, result, matchInfo.gameDuration, matchInfo.gameMode,
@@ -205,7 +196,7 @@ app.post('/analyze', requireAuth, analysisRateLimit, zValidator('json', analyzeS
       matchId,
       puuid,
       status: 'processing',
-      progress: 5,
+      progress: 10,
       progressMessage: 'Fetching game data...',
       champion,
       result,
@@ -217,142 +208,14 @@ app.post('/analyze', requireAuth, analysisRateLimit, zValidator('json', analyzeS
       role: normalizedRole,
     };
 
-    // Background processing with waitUntil
-    c.executionCtx.waitUntil((async () => {
-      try {
-        // Fetch timeline (fault-tolerant)
-        await updateAnalysisProgress(c.env.DB, analysisId, 10, 'Fetching timeline...');
-        const timelineData = await fetchMatchTimeline(matchId, region, c.env.RIOT_API_KEY).catch(() => null);
-
-        // Extract enriched data
-        await updateAnalysisProgress(c.env.DB, analysisId, 15, 'Processing game events...');
-
-        const playerTeamId = riotParticipant.teamId;
-        const teammates = matchInfo.participants
-          .filter((p: any) => p.teamId === playerTeamId && p.puuid !== puuid)
-          .map((p: any) => ({
-            championName: p.championName,
-            kills: p.kills,
-            deaths: p.deaths,
-            assists: p.assists,
-          }));
-        const enemies = matchInfo.participants
-          .filter((p: any) => p.teamId !== playerTeamId)
-          .map((p: any) => ({
-            championName: p.championName,
-            kills: p.kills,
-            deaths: p.deaths,
-            assists: p.assists,
-          }));
-
-        const teamStats = matchInfo.teams?.find((t: any) => t.teamId === playerTeamId);
-        const objectives = teamStats?.objectives ? {
-          dragonKills: teamStats.objectives.dragon?.kills || 0,
-          baronKills: teamStats.objectives.baron?.kills || 0,
-          heraldKills: teamStats.objectives.riftHerald?.kills || 0,
-          turretKills: teamStats.objectives.tower?.kills || 0,
-        } : undefined;
-
-        // Calculate team gold
-        const playerTeamParticipants = matchInfo.participants.filter((p: any) => p.teamId === playerTeamId);
-        const enemyTeamParticipants = matchInfo.participants.filter((p: any) => p.teamId !== playerTeamId);
-        const teamGold = playerTeamParticipants.reduce((sum: number, p: any) => sum + (p.goldEarned || 0), 0);
-        const enemyTeamGold = enemyTeamParticipants.reduce((sum: number, p: any) => sum + (p.goldEarned || 0), 0);
-
-        // Find lane opponent
-        const playerRole = riotParticipant.teamPosition;
-        const laneOpponentRaw = enemyTeamParticipants.find((p: any) => p.teamPosition === playerRole);
-        const laneOpponent = laneOpponentRaw ? {
-          championName: laneOpponentRaw.championName,
-          kills: laneOpponentRaw.kills,
-          deaths: laneOpponentRaw.deaths,
-          assists: laneOpponentRaw.assists,
-        } : undefined;
-        const matchupInfo = laneOpponentRaw
-          ? `${champion} vs ${laneOpponentRaw.championName} in ${normalizedRole}`
-          : undefined;
-
-        // Extract timeline data if available
-        let deathDetails: SimpleMatchData['deathDetails'] = undefined;
-        let objectiveTimeline: SimpleMatchData['objectiveTimeline'] = undefined;
-
-        if (timelineData) {
-          deathDetails = extractDeathDetails(timelineData, riotMatchData, puuid);
-          objectiveTimeline = extractObjectiveEvents(timelineData, riotMatchData, puuid);
-        }
-
-        // Build enriched SimpleMatchData
-        const simpleMatchData: SimpleMatchData = {
-          matchId,
-          champion,
-          role: normalizedRole,
-          result: result as 'win' | 'loss',
-          duration: matchInfo.gameDuration,
-          gameMode: matchInfo.gameMode,
-          kills: riotParticipant.kills,
-          deaths: riotParticipant.deaths,
-          assists: riotParticipant.assists,
-          cs: (riotParticipant.totalMinionsKilled || 0) + (riotParticipant.neutralMinionsKilled || 0),
-          visionScore: riotParticipant.visionScore || 0,
-          goldEarned: riotParticipant.goldEarned || riotParticipant.totalGold || 0,
-          damageDealt: riotParticipant.totalDamageDealtToChampions || 0,
-          wardsPlaced: riotParticipant.wardsPlaced,
-          wardsKilled: riotParticipant.wardsKilled,
-          detectorWardsPlaced: riotParticipant.detectorWardsPlaced,
-          damageDealtToObjectives: riotParticipant.damageDealtToObjectives,
-          objectives,
-          teammates,
-          enemies,
-          deathDetails,
-          objectiveTimeline,
-          teamGold,
-          enemyTeamGold,
-          laneOpponent,
-          matchupInfo,
-        };
-
-        // Call Claude AI
-        await updateAnalysisProgress(c.env.DB, analysisId, 20, 'AI coaching in progress...');
-        const analysisResult = await analyzeMatchWithAI(simpleMatchData, c.env, language);
-
-        console.log(`AI analysis complete for ${analysisId}. Score: ${analysisResult.stats.overallScore}`);
-
-        // Save completed analysis
-        await c.env.DB.prepare(`
-          UPDATE analyses SET
-            status = 'completed',
-            progress = 100,
-            progress_message = 'Analysis complete',
-            stats = ?,
-            errors = ?,
-            tips = ?,
-            completed_at = datetime('now'),
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).bind(
-          JSON.stringify(analysisResult.stats),
-          JSON.stringify(analysisResult.errors),
-          JSON.stringify(analysisResult.tips),
-          analysisId
-        ).run();
-
-        console.log(`Analysis saved: ${analysisId}`);
-      } catch (error) {
-        console.error(`Background analysis failed for ${analysisId}:`, error);
-        await c.env.DB.prepare(`
-          UPDATE analyses SET
-            status = 'failed',
-            progress = 0,
-            progress_message = 'Analysis failed',
-            error_message = ?,
-            updated_at = datetime('now')
-          WHERE id = ?
-        `).bind(
-          error instanceof Error ? error.message : 'Unknown error',
-          analysisId
-        ).run();
-      }
-    })());
+    // Send to queue for reliable background processing (no waitUntil timeout)
+    await c.env.ANALYSIS_QUEUE.send({
+      analysisId,
+      matchId,
+      puuid,
+      region,
+      language,
+    });
 
     return c.json<ApiResponse>({
       success: true,

@@ -444,7 +444,7 @@ export async function processAnalysisJob(job: AnalysisJob, env: Env): Promise<vo
 
     // 4. Analyze with Claude AI (including vision analysis results)
     await updateProgress(env, job.analysisId, 60, 'Analyse IA en cours avec Claude...');
-    const analysis = await analyzeWithClaude(matchData, job, env, visionAnalysis);
+    const analysis = await analyzeWithClaude(matchData, job, env, visionAnalysis, job.language || 'en');
     await updateProgress(env, job.analysisId, 90, 'Analyse IA terminée, sauvegarde...');
 
     // 5. Store results
@@ -1557,6 +1557,21 @@ export interface SimpleMatchData {
   };
   teammates?: Array<{ championName: string; kills: number; deaths: number; assists: number }>;
   enemies?: Array<{ championName: string; kills: number; deaths: number; assists: number }>;
+  // Enriched timeline data
+  deathDetails?: DeathDetail[];
+  objectiveTimeline?: Array<{
+    type: string;
+    subType?: string;
+    timestamp: number;
+    gamePhase: 'early' | 'mid' | 'late';
+    wasPlayerTeam: boolean;
+    wasPlayerAlive: boolean;
+    playerDistanceToObjective: number | null;
+  }>;
+  teamGold?: number;
+  enemyTeamGold?: number;
+  laneOpponent?: { championName: string; kills: number; deaths: number; assists: number };
+  matchupInfo?: string;
 }
 
 // Supported languages for AI analysis output
@@ -1606,6 +1621,12 @@ export async function analyzeMatchWithAI(
     objectives: matchData.objectives,
     teammates: matchData.teammates,
     enemies: matchData.enemies,
+    // Enriched timeline data
+    deathDetails: matchData.deathDetails,
+    teamGold: matchData.teamGold,
+    enemyTeamGold: matchData.enemyTeamGold,
+    laneOpponent: matchData.laneOpponent,
+    matchupInfo: matchData.matchupInfo,
   };
 
   // Create a minimal job for internal use (only matchId is needed for clip URLs)
