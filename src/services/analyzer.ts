@@ -345,12 +345,12 @@ export async function processAnalysisJob(job: AnalysisJob, env: Env): Promise<vo
 
   try {
     // Start progress tracking
-    await updateProgress(env, job.analysisId, 5, 'Initialisation...');
+    await updateProgress(env, job.analysisId, 5, 'Initializing...');
 
     let matchData: MatchData | null = null;
 
     // 1. First, try to use match data sent by nexra-vision (preferred)
-    await updateProgress(env, job.analysisId, 10, 'Chargement des données de match...');
+    await updateProgress(env, job.analysisId, 10, 'Loading match data...');
     if (job.matchData && job.matchData.champion) {
       console.log('Using match data from nexra-vision');
       matchData = convertRiotMatchData(job.matchData);
@@ -421,7 +421,7 @@ export async function processAnalysisJob(job: AnalysisJob, env: Env): Promise<vo
     }
 
     // 3. Check for video clips and analyze with Vision
-    await updateProgress(env, job.analysisId, 25, 'Recherche des clips vidéo...');
+    await updateProgress(env, job.analysisId, 25, 'Searching for video clips...');
     let visionAnalysis: Awaited<ReturnType<typeof analyzeClipsWithVision>> = [];
 
     // Try to get clips from the recording
@@ -432,27 +432,27 @@ export async function processAnalysisJob(job: AnalysisJob, env: Env): Promise<vo
     if (recording?.clips) {
       const storedClips: StoredClip[] = JSON.parse(recording.clips);
       if (storedClips.length > 0) {
-        await updateProgress(env, job.analysisId, 30, `Analyse de ${storedClips.length} clips vidéo...`);
+        await updateProgress(env, job.analysisId, 30, `Analyzing ${storedClips.length} video clips...`);
         console.log(`Found ${storedClips.length} video clips, analyzing with Vision...`);
         visionAnalysis = await analyzeClipsWithVision(storedClips, matchData, env);
         console.log(`Vision analysis complete: ${visionAnalysis.length} clips analyzed`);
-        await updateProgress(env, job.analysisId, 55, 'Clips analysés avec succès');
+        await updateProgress(env, job.analysisId, 55, 'Clips analyzed successfully');
       }
     } else {
-      await updateProgress(env, job.analysisId, 40, 'Pas de clips vidéo trouvés');
+      await updateProgress(env, job.analysisId, 40, 'Processing game events...');
     }
 
     // 4. Analyze with Claude AI (including vision analysis results)
-    await updateProgress(env, job.analysisId, 60, 'Analyse IA en cours avec Claude...');
+    await updateProgress(env, job.analysisId, 60, 'AI coaching in progress...');
     const analysis = await analyzeWithClaude(matchData, job, env, visionAnalysis, job.language || 'en');
-    await updateProgress(env, job.analysisId, 90, 'Analyse IA terminée, sauvegarde...');
+    await updateProgress(env, job.analysisId, 90, 'Saving results...');
 
     // 5. Store results
     await env.DB.prepare(`
       UPDATE analyses SET
         status = 'completed',
         progress = 100,
-        progress_message = 'Analyse terminée',
+        progress_message = 'Analysis complete',
         stats = ?,
         errors = ?,
         tips = ?,
